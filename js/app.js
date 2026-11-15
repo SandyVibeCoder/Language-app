@@ -1,30 +1,28 @@
 import { COURSES, courseById, unitById } from "./courses.js";
 import {
-  CORE_LESSONS,
   DAILY_GOAL,
-  LESSON_META,
-  LESSON_XP,
   blankState,
-  buildPhraseLesson,
-  buildSoundsLesson,
+  buildHeartPractice,
+  buildNodeLesson,
   completeLesson,
-  courseUnitsDone,
+  coursePath,
   dailyXp,
   dayKey,
   dismissInstallHint,
   easeMiss,
-  isLessonDone,
-  missCountForUnit,
-  nextLessonId,
+  gainHeart,
+  heartStatus,
+  isNodeDone,
+  loseHeart,
+  nodeUnlocked,
   normalizeState,
   phraseById,
   recordMiss,
+  refreshHearts,
   speakText,
   speechForTone,
   toneContour,
   tonesFromPinyin,
-  unitCoreComplete,
-  unitUnlocked,
   visibleStreak,
 } from "./engine.js";
 
@@ -256,7 +254,7 @@ function playToneContours(tones, onstart) {
   });
 }
 
-function playLine(text, lang, toneRoman) {
+function playLine(text, lang, toneRoman, slow) {
   const token = ++voiceToken;
   stopTones();
   try {
@@ -278,8 +276,9 @@ function playLine(text, lang, toneRoman) {
     session?.unitId === "sounds" && String(lang || "").toLowerCase().startsWith("zh")
       ? tonesFromPinyin(toneRoman || "")
       : [];
-  const tune =
+  const base =
     zhTones.length === 1 ? speechForTone(zhTones[0]) : zhTones.length > 1 ? { rate: 0.64, pitch: 1 } : null;
+  const tune = slow ? { rate: Math.min(base?.rate ?? 0.9, 0.55), pitch: base?.pitch || 1 } : base;
   const contour = zhTones.length ? playToneContours(zhTones, markPlaying) : Promise.resolve(false);
   contour
     .then((toneOk) => {
@@ -312,6 +311,12 @@ function paintAudio() {
       const label = failed ? "Try again" : playing ? "Playing…" : "Play";
       if (play.textContent !== label) play.textContent = label;
     }
+    const status = root().querySelector("[data-audio-status]");
+    if (status && session) {
+      const playing = session.voice === "playing" || session.voice === "trying";
+      const text = session.voice === "failed" ? "No voice on this phone. Use the choices." : playing ? "Playing…" : "";
+      if (status.textContent !== text) status.textContent = text;
+    }
     const course = currentCourse();
     const step = currentStep();
     if (session?.voice === "failed" && step?.type === "listen" && course && !root().querySelector(".fallback")) {
@@ -341,10 +346,176 @@ function currentCourse() {
   return view.courseId ? courseById(view.courseId) : null;
 }
 
-function currentUnit() {
+let heartTimer = 0;
+
+function currentNode() {
   const course = currentCourse();
-  if (!course || !view.unitId || view.unitId === "sounds") return null;
-  return unitById(course, view.unitId);
+  if (!course || !view.lessonId) return null;
+  return coursePath(course).find((node) => node.id === view.lessonId) || null;
+}
+
+function answerLine(course, step) {
+  const phrase = step?.phraseId ? findPhrase(course, step.phraseId) : null;
+  if (step?.type === "tiles") return `${step.answer.join(" ")}  ${phrase?.script || ""}`.trim();
+  if (step?.type === "listen" && phrase) return `${phrase.en} · ${phrase.roman}`;
+  if (step?.type === "match") return "Match each line with its meaning.";
+  if (step?.type === "choice" && phrase) return step.direction === "toRoman" ? `${phrase.roman}  ${phrase.script}` : phrase.en;
+  if (step?.reveal) return step.reveal;
+  const option = step?.options?.find((item) => item.id === step.answerId);
+  return option?.text || "";
+}
+
+function queueRepeat(step) {
+  if (!step || session.queued?.[step.uid]) return;
+  session.queued[step.uid] = true;
+  session.built.steps.push({ ...step, uid: `${step.uid}r`, repeat: true });
+}
+
+function grade(ok) {
+  const step = currentStep();
+  const course = currentCourse();
+  session.feedback = { ok, line: answerLine(course, step) };
+  if (step.phraseId) save(ok ? easeMiss(state, session.courseId, step.phraseId) : recordMiss(state, session.courseId, step.phraseId));
+  if (!ok) {
+    session.wrongs += 1;
+    queueRepeat(step);
+    if (!session.practice) {
+      const lost = loseHeart(state, Date.now());
+      save(lost.state);
+      if (lost.hearts <= 0) {
+        session.phase = "hearts";
+        render();
+        return;
+      }
+    }
+  }
+  render();
+}
+
+function advance() {
+  stopSpeech();
+  session.feedback = null;
+  session.tiles = [];
+  session.matchSel = null;
+  session.badPair = null;
+  session.matched = [];
+  session.matchMissed = false;
+  session.matchOrder = null;
+  session.pickedOption = null;
+  session.voice = "idle";
+  session.index += 1;
+  if (!currentStep()) {
+    if (session.practice) finishPractice();
+    else finishLesson();
+    return;
+  }
+  session.phase = "run";
+  render();
+}
+
+function beginBuilt(courseId, unitId, lessonId, nodeKind, built, practice) {
+  stopSpeech();
+  built.steps = (built.steps || []).map((step, index) => ({ ...step, uid: String(index) }));
+  session = {
+    courseId,
+    unitId,
+    lessonId,
+    nodeKind,
+    built,
+    index: 0,
+    phase: "run",
+    feedback: null,
+    tiles: [],
+    matchSel: null,
+    matched: [],
+    matchMissed: false,
+    badPair: null,
+    matchOrder: null,
+    queued: {},
+    voice: "idle",
+    wrongs: 0,
+    result: null,
+    practice,
+    resume: null,
+    autoFor: null,
+    gated: false,
+  };
+  view = { name: "lesson", courseId, unitId, lessonId };
+  resetScroll = true;
+  render();
+}
+
+function beginNode(courseId, node) {
+  const course = courseById(courseId);
+  const built = buildNodeLesson(course, node, state);
+  beginBuilt(courseId, node.unitId, node.id, node.kind, built, false);
+}
+
+function startNode(courseId, nodeId) {
+  const course = courseById(courseId);
+  const nodes = coursePath(course);
+  const index = nodes.findIndex((node) => node.id === nodeId);
+  const node = nodes[index];
+  if (!node || !nodeUnlocked(state, course, index)) return;
+  save(refreshHearts(state, Date.now()));
+  if (heartStatus(state, Date.now()).hearts <= 0) {
+    stopSpeech();
+    session = {
+      courseId,
+      unitId: node.unitId,
+      lessonId: node.id,
+      phase: "hearts",
+      gated: true,
+      practice: false,
+      built: { title: "Hearts", steps: [] },
+      wrongs: 0,
+    };
+    view = { name: "lesson", courseId, unitId: node.unitId, lessonId: node.id };
+    writeHistory("push");
+    resetScroll = true;
+    render();
+    return;
+  }
+  beginNode(courseId, node);
+  writeHistory("push");
+}
+
+function startHeartPractice() {
+  const course = currentCourse();
+  const paused = session?.built?.steps?.length && !session.practice ? session : null;
+  beginBuilt(course.id, "practice", "heart", "heart", buildHeartPractice(course, state), true);
+  session.resume = paused;
+  writeHistory("push");
+}
+
+function finishPractice() {
+  save(gainHeart(refreshHearts(state, Date.now()), Date.now()));
+  const result = completeLesson(state, {
+    courseId: session.courseId,
+    unitId: "practice",
+    lessonId: "heart",
+    xp: 5,
+    today: dayKey(),
+  });
+  save(result.state);
+  const resume = session.resume;
+  if (resume?.built?.steps) {
+    session = resume;
+    session.feedback = null;
+    session.tiles = [];
+    session.matchSel = null;
+    session.phase = "run";
+    session.index += 1;
+    if (!currentStep()) finishLesson();
+    else render();
+    return;
+  }
+  session.phase = "done";
+  session.result = { ...result, heart: true };
+  session.practice = true;
+  writeHistory("replace");
+  resetScroll = true;
+  render();
 }
 
 function screenSnapshot() {
@@ -397,47 +568,6 @@ function goCourse(courseId) {
   render();
 }
 
-function goUnit(courseId, unitId) {
-  stopSpeech();
-  session = null;
-  view = { name: "unit", courseId, unitId };
-  writeHistory("push");
-  resetScroll = true;
-  render();
-}
-
-function beginLesson(courseId, unitId, lessonId) {
-  stopSpeech();
-  const course = courseById(courseId);
-  const built =
-    unitId === "sounds"
-      ? buildSoundsLesson(course)
-      : buildPhraseLesson(course, unitById(course, unitId), lessonId, state);
-  session = {
-    courseId,
-    unitId,
-    lessonId,
-    built,
-    queue: built.phrases ? built.phrases.slice() : null,
-    flipped: false,
-    finished: 0,
-    index: 0,
-    picked: null,
-    voice: "idle",
-    wrongs: 0,
-    phase: "run",
-    result: null,
-  };
-  view = { name: "lesson", courseId, unitId, lessonId };
-  resetScroll = true;
-  render();
-}
-
-function startLesson(courseId, unitId, lessonId) {
-  beginLesson(courseId, unitId, lessonId);
-  writeHistory("push");
-}
-
 function restoreDone(saved) {
   session = {
     courseId: saved.courseId,
@@ -479,7 +609,38 @@ function showHistory(saved) {
     return;
   }
   if (saved.name === "lesson") {
-    beginLesson(saved.courseId, saved.unitId, saved.lessonId);
+    const course = courseById(saved.courseId);
+    if (!course) {
+      goHome();
+      return;
+    }
+    if (saved.lessonId === "heart") {
+      beginBuilt(saved.courseId, "practice", "heart", "heart", buildHeartPractice(course, state), true);
+      return;
+    }
+    const node = coursePath(course).find((item) => item.id === saved.lessonId);
+    if (!node) {
+      view = { name: "course", courseId: saved.courseId };
+      session = null;
+      render();
+      return;
+    }
+    if (heartStatus(refreshHearts(state, Date.now()), Date.now()).hearts <= 0) {
+      session = {
+        courseId: saved.courseId,
+        unitId: node.unitId,
+        lessonId: node.id,
+        phase: "hearts",
+        gated: true,
+        practice: false,
+        built: { title: "Hearts", steps: [] },
+        wrongs: 0,
+      };
+      view = { name: "lesson", courseId: saved.courseId, unitId: node.unitId, lessonId: node.id };
+      render();
+      return;
+    }
+    beginNode(saved.courseId, node);
     return;
   }
   session = null;
@@ -500,12 +661,11 @@ function goBack() {
 function finishLesson() {
   if (!session || session.phase === "done") return;
   stopSpeech();
-  const xp = session.unitId === "sounds" ? LESSON_XP.sounds : LESSON_XP[session.lessonId];
-  const unitId = session.unitId === "sounds" ? "sounds" : session.unitId;
-  const lessonId = session.unitId === "sounds" ? "intro" : session.lessonId;
+  const xp = session.nodeKind === "sounds" ? 8 : session.nodeKind === "checkpoint" ? 12 : 15;
+  const lessonId = session.nodeKind === "sounds" ? "sounds" : session.lessonId;
   const result = completeLesson(state, {
     courseId: session.courseId,
-    unitId,
+    unitId: session.unitId,
     lessonId,
     xp,
     today: dayKey(),
@@ -533,9 +693,8 @@ function onClick(event) {
     return;
   }
   if (action === "course") return goCourse(el.dataset.course);
-  if (action === "unit") return goUnit(view.courseId, el.dataset.unit);
-  if (action === "start") return startLesson(view.courseId, view.unitId || el.dataset.unit, el.dataset.lesson);
-  if (action === "start-sounds") return startLesson(el.dataset.course || view.courseId, "sounds", "intro");
+  if (action === "node") return startNode(view.courseId, el.dataset.node);
+  if (action === "heart-practice") return startHeartPractice();
   if (action === "dismiss-install") {
     save(dismissInstallHint(state));
     render();
@@ -546,98 +705,109 @@ function onClick(event) {
     if (action === "done-stop") return afterLesson(false);
     return;
   }
+  if (session.phase === "hearts") return;
 
-  if (action === "flip") {
-    revealCard();
-    return;
-  }
-  if (action === "hear" || action === "play" || action === "example") {
+  if (action === "replay" || action === "play" || action === "slow" || action === "example") {
     event.preventDefault();
-  }
-  if (action === "hear") {
     const course = currentCourse();
-    const phrase = session.queue ? session.queue[0] : findPhrase(course, currentStep()?.phraseId);
-    if (phrase) playLine(speakText(phrase), course.voice, phrase.roman);
+    const step = currentStep();
+    const slow = action === "slow";
+    if (action === "example") {
+      const example = step?.examples?.[Number(el.dataset.index)];
+      if (example) playLine(example.script, course.voice, example.roman, slow);
+      return;
+    }
+    if (step?.speak?.script) playLine(step.speak.script, course.voice, step.speak.roman || "", slow);
+    else if (step?.phraseId) {
+      const phrase = findPhrase(course, step.phraseId);
+      if (phrase) playLine(speakText(phrase), course.voice, phrase.roman, slow);
+    }
     return;
   }
-  if (action === "again") {
-    const phrase = session.queue[0];
-    save(recordMiss(state, session.courseId, phrase.id));
-    session.queue = session.queue.slice(1).concat(phrase);
-    session.flipped = false;
+  if (action === "tile") {
+    if (session.feedback) return;
+    const key = el.dataset.key;
+    if (session.tiles.some((tile) => tile.key === key)) session.tiles = session.tiles.filter((tile) => tile.key !== key);
+    else session.tiles.push({ key, text: el.dataset.text });
     render();
     return;
   }
-  if (action === "got") {
-    session.queue = session.queue.slice(1);
-    session.finished += 1;
-    session.flipped = false;
-    if (session.queue.length === 0) finishLesson();
-    else render();
+  if (action === "check") {
+    if (session.feedback) return;
+    const step = currentStep();
+    const got = session.tiles.map((tile) => tile.text);
+    grade(got.length === step.answer.length && got.every((word, index) => word === step.answer[index]));
     return;
   }
   if (action === "pick") {
-    if (session.picked) return;
+    if (session.feedback) return;
     const step = currentStep();
-    session.picked = el.dataset.option;
-    const right = session.picked === step.answerId;
-    if (!right) session.wrongs += 1;
-    if (step.phraseId) {
-      save(
-        right
-          ? easeMiss(state, session.courseId, step.phraseId)
-          : recordMiss(state, session.courseId, step.phraseId),
-      );
+    session.pickedOption = el.dataset.option;
+    grade(session.pickedOption === step.answerId);
+    return;
+  }
+  if (action === "pair") {
+    if (session.feedback) return;
+    const [side, id] = el.dataset.pair.split(":");
+    if (session.matched.includes(id)) return;
+    session.badPair = null;
+    if (!session.matchSel || session.matchSel.side === side) {
+      session.matchSel = { side, id };
+      render();
+      return;
+    }
+    if (session.matchSel.id === id) {
+      session.matched.push(id);
+      session.matchSel = null;
+      const step = currentStep();
+      if (session.matched.length === step.pairs.length) {
+        if (session.matchMissed) queueRepeat(step);
+        for (const pair of step.pairs) {
+          save(
+            session.matchMissed
+              ? recordMiss(state, session.courseId, pair.id)
+              : easeMiss(state, session.courseId, pair.id),
+          );
+        }
+        session.feedback = {
+          ok: !session.matchMissed,
+          line: session.matchMissed ? "Some pairs were mixed. They'll come back." : "All five pairs matched.",
+        };
+      }
+      render();
+      return;
+    }
+    session.matchMissed = true;
+    session.badPair = [session.matchSel.id, id];
+    session.matchSel = null;
+    session.wrongs += 1;
+    if (!session.practice) {
+      const lost = loseHeart(state, Date.now());
+      save(lost.state);
+      if (lost.hearts <= 0) {
+        queueRepeat(currentStep());
+        session.phase = "hearts";
+        render();
+        return;
+      }
     }
     render();
     return;
   }
-  if (action === "next") {
-    stopSpeech();
-    session.index += 1;
-    session.picked = null;
-    session.voice = "idle";
-    if (!currentStep()) finishLesson();
-    else render();
-    return;
-  }
-  if (action === "play") {
-    const course = currentCourse();
+  if (action === "next" || action === "continue") {
     const step = currentStep();
-    if (step.speak?.script) playLine(step.speak.script, course.voice, step.speak.roman || "");
-    else {
-      const phrase = findPhrase(course, step.phraseId);
-      if (phrase) playLine(speakText(phrase), course.voice, phrase.roman);
-    }
-    return;
-  }
-  if (action === "example") {
-    const course = currentCourse();
-    const example = currentStep()?.examples?.[Number(el.dataset.index)];
-    if (example) playLine(example.script, course.voice, example.roman);
+    if (step?.type === "slide" || session.feedback) advance();
   }
 }
 
 function afterLesson(goOn) {
-  const courseId = session.courseId;
-  const unitId = session.unitId;
-  const lessonId = session.lessonId;
-  const wrongs = session.wrongs;
+  const course = currentCourse();
+  const nodes = course ? coursePath(course) : [];
+  const index = nodes.findIndex((node) => node.id === session.lessonId);
+  const next = nodes[index + 1];
   stopSpeech();
-  if (!goOn || unitId === "sounds") {
-    goBack();
-    return;
-  }
-  const course = courseById(courseId);
-  const unit = unitById(course, unitId);
-  const next = nextLessonId(state, courseId, unit);
-  const misses = missCountForUnit(state, courseId, unit);
-  if (next && next !== "review") {
-    startLesson(courseId, unitId, next);
-    return;
-  }
-  if (next === "review" && lessonId !== "review" && (wrongs > 0 || misses > 0)) {
-    startLesson(courseId, unitId, "review");
+  if (goOn && next && !session.practice && heartStatus(state, Date.now()).hearts > 0) {
+    startNode(course.id, next.id);
     return;
   }
   goBack();
@@ -744,8 +914,7 @@ function render() {
   app.className = `${course ? `tone-${course.id}` : "tone-home"}${view.name === "lesson" ? " screen" : ""}`;
   let html = "";
   if (view.name === "home") html = renderHome();
-  else if (view.name === "course") html = renderCourse(course);
-  else if (view.name === "unit") html = renderUnit(course, currentUnit());
+  else if (view.name === "course" || view.name === "unit") html = renderCourse(course);
   else html = renderLesson(course);
   app.innerHTML = html;
   const burst = app.querySelector(".confetti");
@@ -764,6 +933,37 @@ function render() {
   if (next) next.scrollTop = keepMain;
   if (shouldReset) window.scrollTo(0, 0);
   else if (window.scrollY !== keepWin) window.scrollTo(0, keepWin);
+  if (shouldReset) app.querySelector(".path-node.current")?.scrollIntoView({ block: "center" });
+  const step = currentStep();
+  if (session?.phase === "run" && step?.type === "listen" && session.autoFor !== session.index) {
+    session.autoFor = session.index;
+    const phrase = findPhrase(course, step.phraseId);
+    if (phrase) playLine(speakText(phrase), course.voice, phrase.roman);
+  }
+  armHearts();
+}
+
+function armHearts() {
+  window.clearTimeout(heartTimer);
+  const status = heartStatus(state, Date.now());
+  if (!status.next) return;
+  const wait = Math.max(800, status.next - Date.now() + 40);
+  heartTimer = window.setTimeout(() => {
+    save(refreshHearts(state, Date.now()));
+    render();
+  }, Math.min(wait, 60 * 60 * 1000));
+}
+
+function heartRow() {
+  const now = Date.now();
+  const status = heartStatus(state, now);
+  const icons = Array.from({ length: 5 }, (_, index) => `<span class="heart ${index < status.hearts ? "on" : "off"}">♥</span>`).join("");
+  let label = `${status.hearts} of 5 hearts`;
+  if (status.next) {
+    const mins = Math.max(1, Math.ceil((status.next - now) / 60000));
+    label = mins === 1 ? "Next heart in 1 minute" : `Next heart in ${mins} minutes`;
+  }
+  return `<div class="hearts" aria-label="${status.hearts} of 5 hearts"><span class="heart-icons">${icons}</span><span>${esc(label)}</span></div>`;
 }
 
 function banner() {
@@ -804,6 +1004,7 @@ function renderHome() {
         </div>
         <span>${esc(goalLabel)}</span>
       </div>
+      ${heartRow()}
       <div class="course-list">
         ${COURSES.map((course) => courseCard(course)).join("")}
       </div>
@@ -812,23 +1013,16 @@ function renderHome() {
     </main>`;
 }
 
-function lessonsDone(course) {
-  let count = 0;
-  for (const unit of course.units) {
-    for (const id of CORE_LESSONS) {
-      if (isLessonDone(state, course.id, unit.id, id)) count += 1;
-    }
-  }
-  return count;
+function pathProgress(course) {
+  const nodes = coursePath(course);
+  const done = nodes.filter((node) => isNodeDone(state, course, node)).length;
+  return { done, total: nodes.length };
 }
 
 function courseCard(course) {
-  const units = courseUnitsDone(state, course);
-  const lessons = lessonsDone(course);
-  const total = course.units.length * CORE_LESSONS.length;
-  const pct = Math.round((lessons / total) * 100);
-  const status =
-    units > 0 ? `${units} of ${course.units.length} units` : lessons > 0 ? "In progress" : "Not started";
+  const progress = pathProgress(course);
+  const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+  const status = progress.done > 0 ? `${progress.done} of ${progress.total}` : "Not started";
   return `
     <button type="button" class="course-card tone-${course.id}" data-action="course" data-course="${course.id}">
       <span class="place">${esc(course.place)}</span>
@@ -839,71 +1033,50 @@ function courseCard(course) {
 }
 
 function renderCourse(course) {
-  const soundsDone = isLessonDone(state, course.id, "sounds", "intro");
-  const items = course.units
-    .map((unit, index) => {
-      const open = unitUnlocked(state, course, index);
-      const done = unitCoreComplete(state, course.id, unit.id);
-      const pips = CORE_LESSONS.map((id) =>
-        `<i class="${isLessonDone(state, course.id, unit.id, id) ? "on" : ""}"></i>`,
-      ).join("");
-      const body = `
-        <span class="node ${done ? "done" : ""} ${open ? "" : "locked"}">${done ? checkSvg() : index + 1}</span>
-        <span class="path-copy">
-          <strong>${esc(unit.title)}</strong>
-          <small>${open ? `${unit.phrases.length} phrases` : `After ${esc(course.units[index - 1].title)}`}</small>
-          ${open ? `<span class="pips" aria-hidden="true">${pips}</span>` : ""}
-        </span>`;
-      if (!open) return `<li><div class="path-card is-locked">${body}</div></li>`;
-      return `<li><button type="button" class="path-card ${done ? "is-done" : ""}" data-action="unit" data-unit="${unit.id}">${body}</button></li>`;
+  const nodes = coursePath(course);
+  const current = nodes.findIndex((node, index) => nodeUnlocked(state, course, index) && !isNodeDone(state, course, node));
+  let seenUnit = "";
+  let unitNumber = 0;
+  const rows = nodes
+    .map((node, index) => {
+      const unlocked = nodeUnlocked(state, course, index);
+      const done = isNodeDone(state, course, node);
+      const isCurrent = index === current;
+      const slot = index % 4;
+      const pos = slot === 1 ? "right" : slot === 3 ? "left" : "mid";
+      let head = "";
+      if (node.kind === "sounds") {
+        head = `<li class="path-slot head"><p class="path-kicker">Sounds</p></li>`;
+      } else if (node.unitId !== seenUnit) {
+        seenUnit = node.unitId;
+        unitNumber += 1;
+        const unit = unitById(course, node.unitId);
+        head = `<li class="path-slot head"><header class="unit-head"><p class="eyebrow">Unit ${unitNumber}</p><h2>${esc(unit.title)}</h2><p>${esc(unit.blurb)}</p></header></li>`;
+      }
+      const icon = done ? "✓" : node.kind === "checkpoint" ? "★" : node.kind === "sounds" ? "Aa" : String((index % 9) + 1);
+      const label = node.kind === "checkpoint" ? "Review" : node.title;
+      return `${head}<li class="path-slot ${pos}">
+        <button type="button" class="path-node ${done ? "done" : ""} ${isCurrent ? "current" : ""} ${unlocked ? "" : "locked"} ${node.kind}" data-action="node" data-node="${esc(node.id)}" ${unlocked ? "" : "disabled"}>
+          <span>${icon}</span>
+        </button>
+        <span class="node-label">${esc(label)}</span>
+      </li>`;
     })
     .join("");
+  const empty = heartStatus(state, Date.now()).hearts <= 0
+    ? `<button type="button" class="secondary" data-action="heart-practice">Practice for a heart</button>`
+    : "";
   return `
     ${topbar(course.name)}
-    <main class="main">
+    <main class="main path-main">
       ${banner()}
+      ${heartRow()}
       <p class="lede tight">${esc(course.blurb)}</p>
-      <ol class="path">
-        <li>
-          <button type="button" class="path-card ${soundsDone ? "is-done" : ""}" data-action="start-sounds" data-course="${course.id}">
-            <span class="node ${soundsDone ? "done" : ""}">${soundsDone ? checkSvg() : "Aa"}</span>
-            <span class="path-copy">
-              <strong>${esc(course.sounds.title)}</strong>
-              <small>${soundsDone ? "Done" : esc(course.sounds.blurb)}</small>
-            </span>
-          </button>
-        </li>
-        ${items}
-      </ol>
+      ${empty}
+      <ol class="winding">${rows}</ol>
     </main>`;
 }
 
-function renderUnit(course, unit) {
-  if (!unit) return renderCourse(course);
-  const misses = missCountForUnit(state, course.id, unit);
-  const rows = LESSON_META.map((lesson, index) => {
-    const done = isLessonDone(state, course.id, unit.id, lesson.id);
-    const extra =
-      lesson.id === "review" && misses > 0 ? `${misses} to revisit` : done ? "Done" : lesson.optional ? "Optional" : "Ready";
-    return `
-      <button type="button" class="lesson-row" data-action="start" data-lesson="${lesson.id}">
-        <span class="node ${done ? "done" : ""}">${done ? checkSvg() : index + 1}</span>
-        <span class="path-copy">
-          <strong>${esc(lesson.title)}</strong>
-          <small>${esc(lesson.detail)}</small>
-        </span>
-        <span class="row-state">${esc(extra)}</span>
-      </button>`;
-  }).join("");
-  return `
-    ${topbar(unit.title)}
-    <main class="main">
-      ${banner()}
-      <p class="lede tight">${esc(unit.blurb)}</p>
-      <aside class="tip"><strong>Good to know.</strong> ${esc(unit.tip)}</aside>
-      <div class="lesson-list">${rows}</div>
-    </main>`;
-}
 
 function topbar(title) {
   return `
@@ -929,10 +1102,10 @@ function lessonBar(title) {
 }
 
 function renderLesson(course) {
-  if (!session) return renderHome();
+  if (!session) return renderCourse(course);
+  if (session.phase === "hearts") return renderHearts(course);
   if (session.phase === "done") return renderDone(course);
-  if (session.built.kind === "flashcards") return renderCards(course);
-  return renderSteps(course);
+  return renderQuestion(course);
 }
 
 function lessonProgress(doneCount, total) {
@@ -940,65 +1113,55 @@ function lessonProgress(doneCount, total) {
   return `<div class="track lesson-track" aria-hidden="true"><div class="fill" style="width:${pct}%"></div></div>`;
 }
 
-function renderCards(course) {
-  const phrase = session.queue[0];
-  const total = session.finished + session.queue.length;
-  const actions = session.flipped
-    ? `<div class="pair" data-flip-slot>
-         <button type="button" class="secondary" data-action="again">Again</button>
-         <button type="button" class="primary" data-action="got">Got it</button>
-       </div>`
-    : `<button type="button" class="primary" data-action="flip" data-flip-slot>Show the phrase</button>`;
+function feedbackBlock() {
+  if (!session.feedback) return "";
+  const ok = session.feedback.ok;
+  return `<div class="feedback ${ok ? "ok" : "bad"}" role="status"><strong>${ok ? "Nice." : "Not quite."}</strong><p>${esc(session.feedback.line)}</p></div>`;
+}
+
+function renderHearts(course) {
+  const status = heartStatus(state, Date.now());
+  const mins = status.next ? Math.max(1, Math.ceil((status.next - Date.now()) / 60000)) : 30;
   return `
-    ${lessonBar(session.built.title)}
-    ${lessonProgress(session.finished, total)}
-    <main class="main lesson cards">
-      <p class="count">${session.finished + 1} of ${total}</p>
-      <div class="flip-scene">
-        <div class="flip-card${session.flipped ? " is-flipped" : ""}" data-action="flip" tabindex="0" role="button" aria-pressed="${session.flipped ? "true" : "false"}" aria-label="${esc(session.flipped ? phrase.roman : phrase.en)}">
-          <div class="flip-face flip-front">
-            <p class="english">${esc(phrase.en)}</p>
-            <p class="hint">Tap the card when you want the phrase.</p>
-          </div>
-          <div class="flip-face flip-back">
-            <p class="roman">${esc(phrase.roman)}</p>
-            <p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>
-            ${phrase.hint ? `<p class="hint">${esc(phrase.hint)}</p>` : ""}
-          </div>
-        </div>
-      </div>
-      ${session.hearFailed ? '<p class="hint">No voice on this phone. You can still read the phrase.</p>' : ""}
+    ${lessonBar("Hearts")}
+    <main class="main lesson">
+      ${heartRow()}
+      <h2>Out of hearts</h2>
+      <p>A heart comes back every 30 minutes. The next one is in about ${mins} ${mins === 1 ? "minute" : "minutes"}.</p>
+      <p>Or practice a few questions and earn one now. Nothing to buy.</p>
     </main>
     <footer class="dock">
-      <button type="button" class="secondary" data-action="hear">Hear it</button>
-      ${actions}
+      <button type="button" class="primary" data-action="heart-practice">Practice for a heart</button>
     </footer>`;
 }
 
-function renderSteps(course) {
+function renderQuestion(course) {
   const step = currentStep();
   const total = session.built.steps.length;
   const note = accentNote(course);
   let body = "";
-  if (step.type === "slide") body = renderSlide(course, step, note);
-  else if (step.type === "listen") body = renderListen(course, step, note);
+  if (!step) body = "";
+  else if (step.type === "slide") body = renderSlide(course, step, note);
+  else if (step.type === "listen") body = renderListen(course, step);
+  else if (step.type === "tiles") body = renderTiles(course, step);
+  else if (step.type === "match") body = renderMatch(course, step);
   else body = renderChoice(course, step, note);
-
-  const showNext = step.type === "slide" || session.picked;
-  const phraseReady = session.picked && step.phraseId;
-  const dock = showNext
-    ? `${phraseReady ? '<button type="button" class="secondary" data-action="hear">Hear it</button>' : ""}
-       <button type="button" class="primary" data-action="next">${session.index === total - 1 ? "Finish" : "Continue"}</button>`
-    : "";
+  const showContinue = step?.type === "slide" || session.feedback;
+  const tileReady = step?.type === "tiles" && session.tiles.length === step.answer.length;
+  const showCheck = step?.type === "tiles" && !session.feedback;
+  const dock = `
+    ${feedbackBlock()}
+    ${showCheck ? `<button type="button" class="primary" data-action="check" ${tileReady ? "" : "disabled"}>Check</button>` : ""}
+    ${showContinue ? `<button type="button" class="primary" data-action="continue">${session.index === total - 1 ? "Finish" : "Continue"}</button>` : ""}`;
   return `
     ${lessonBar(session.built.title)}
     ${lessonProgress(session.index, total)}
+    <div class="lesson-hearts">${heartRow()}</div>
     <main class="main lesson">
-      <p class="count">${session.index + 1} of ${total}</p>
-      ${session.index === 0 && session.built.intro ? `<p class="intro">${esc(session.built.intro)}</p>` : ""}
+      <p class="count">${Math.min(session.index + 1, total)} of ${total}</p>
       ${body}
     </main>
-    <footer class="dock">${dock}</footer>`;
+    <footer class="dock ${session.feedback ? (session.feedback.ok ? "is-ok" : "is-bad") : ""}">${dock}</footer>`;
 }
 
 function renderSlide(course, step, note) {
@@ -1024,113 +1187,136 @@ function renderSlide(course, step, note) {
     </article>`;
 }
 
+function optionClass(step, id) {
+  if (!session.feedback) return "option";
+  if (id === step.answerId) return "option is-right";
+  if (id === session.pickedOption) return "option is-wrong";
+  return "option is-dim";
+}
+
 function renderChoice(course, step, note) {
-  const phrase = step.phraseId ? findPhrase(course, step.phraseId) : null;
   const options = step.options
     .map((option) => {
-      let cls = "option";
-      if (session.picked) {
-        if (option.id === step.answerId) cls += " is-right";
-        else if (option.id === session.picked) cls += " is-wrong";
-        else cls += " is-dim";
-      }
-      return `<button type="button" class="${cls}" data-action="pick" data-option="${esc(option.id)}" ${session.picked ? "disabled" : ""}>${esc(option.text)}</button>`;
+      const script = step.direction === "toRoman" && option.script ? `<small class="script">${esc(option.script)}</small>` : "";
+      return `<button type="button" class="${optionClass(step, option.id)}" data-action="pick" data-option="${esc(option.id)}" ${session.feedback ? "disabled" : ""}><span>${esc(option.text)}</span>${script}</button>`;
     })
     .join("");
-  const reveal = session.picked ? answerBlock(course, phrase, step.reveal) : "";
+  const spoken = step.direction === "toEn";
   return `
     <p class="prompt-label">${esc(step.promptLabel || "")}</p>
-    <p class="prompt">${esc(step.prompt)}</p>
-    ${step.speak ? `<button type="button" class="secondary slim" data-action="play">${esc(step.speak.label || "Hear it")}</button>` : ""}
+    <p class="${spoken ? "prompt roman" : "prompt"}">${esc(step.prompt)}</p>
+    ${step.promptScript ? `<p class="script" lang="${scriptLang(course)}">${esc(step.promptScript)}</p>` : ""}
     ${note && session.unitId === "sounds" ? `<p class="hint">${esc(note)}</p>` : ""}
-    <div class="options" ${session.picked ? 'aria-live="polite"' : ""}>${options}</div>
-    ${reveal}`;
+    ${step.speak ? `<button type="button" class="secondary slim" data-action="play">${esc(step.speak.label || "Hear it")}</button>` : ""}
+    <div class="options">${options}</div>`;
 }
 
-function renderListen(course, step, note) {
-  const phrase = findPhrase(course, step.phraseId);
-  const failed = session.voice === "failed";
-  const playing = session.voice === "playing" || session.voice === "trying";
-  const playLabel = failed ? "Try again" : playing ? "Playing…" : "Play";
+function renderListen(course, step) {
   const options = step.options
-    .map((option) => {
-      let cls = "option";
-      if (session.picked) {
-        if (option.id === step.answerId) cls += " is-right";
-        else if (option.id === session.picked) cls += " is-wrong";
-        else cls += " is-dim";
-      }
-      return `<button type="button" class="${cls}" data-action="pick" data-option="${esc(option.id)}" ${session.picked ? "disabled" : ""}>${esc(option.text)}</button>`;
-    })
+    .map(
+      (option) =>
+        `<button type="button" class="${optionClass(step, option.id)}" data-action="pick" data-option="${esc(option.id)}" ${session.feedback ? "disabled" : ""}>${esc(option.text)}</button>`,
+    )
     .join("");
-  const fallback = failed
-    ? `<div class="fallback">
-         <p class="roman">${esc(phrase.roman)}</p>
-         <p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>
-         <p class="hint">No voice on this phone. Use the ${esc(course.romanName.toLowerCase())} and pick the meaning.</p>
-       </div>`
+  const phrase = session.feedback ? findPhrase(course, step.phraseId) : null;
+  const shown = phrase
+    ? `<p class="roman">${esc(phrase.roman)}</p><p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>`
     : "";
   return `
-    <p class="prompt-label">Hear it, then pick the meaning.</p>
-    <button type="button" class="play" data-action="play">${esc(playLabel)}</button>
-    ${note ? `<p class="hint">${esc(note)}</p>` : ""}
-    ${fallback}
-    <div class="options">${options}</div>
-    ${session.picked ? answerBlock(course, phrase) : ""}`;
+    <p class="prompt-label">${esc(step.promptLabel || "What did you hear?")}</p>
+    <div class="listen-row">
+      <button type="button" class="play" data-action="replay">Replay</button>
+      <button type="button" class="secondary slim" data-action="slow">Slow</button>
+    </div>
+    <p class="hint" data-audio-status></p>
+    ${shown}
+    <div class="options">${options}</div>`;
 }
 
-function answerBlock(course, phrase, reveal) {
-  if (!phrase) return reveal ? `<p class="reveal">${esc(reveal)}</p>` : "";
+function renderTiles(course, step) {
+  const phrase = findPhrase(course, step.phraseId);
+  const chosen = session.tiles
+    .map(
+      (tile) =>
+        `<button type="button" class="tile" data-action="tile" data-key="${esc(tile.key)}" data-text="${esc(tile.text)}">${esc(tile.text)}</button>`,
+    )
+    .join("");
+  const bank = step.tiles
+    .map((word, index) => {
+      const used = session.tiles.some((tile) => tile.key === String(index));
+      return `<button type="button" class="tile" data-action="tile" data-key="${index}" data-text="${esc(word)}" ${used || session.feedback ? "disabled" : ""}>${esc(word)}</button>`;
+    })
+    .join("");
   return `
-    <div class="answer-card">
-      <p class="english small">${esc(phrase.en)}</p>
-      <p class="roman">${esc(phrase.roman)} <span class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</span></p>
-      ${phrase.hint ? `<p class="hint">${esc(phrase.hint)}</p>` : ""}
-      ${reveal ? `<p class="hint">${esc(reveal)}</p>` : ""}
-    </div>`;
+    <p class="prompt-label">${esc(step.promptLabel)}</p>
+    <p class="prompt">${esc(step.prompt)}</p>
+    <div class="tile-answer">${chosen || `<span class="hint">Tap the words below, in order.</span>`}</div>
+    <div class="tile-bank">${bank}</div>
+    ${phrase && session.feedback ? `<p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>` : ""}`;
+}
+
+function matchOrder(step) {
+  if (session.matchOrder && session.matchOrderFor === session.index) return session.matchOrder;
+  const items = [];
+  step.pairs.forEach((pair) => {
+    items.push({ side: "roman", id: pair.id, text: pair.roman, script: pair.script });
+    items.push({ side: "en", id: pair.id, text: pair.en, script: "" });
+  });
+  for (let i = items.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  session.matchOrder = items;
+  session.matchOrderFor = session.index;
+  return items;
+}
+
+function renderMatch(course, step) {
+  const cells = matchOrder(step)
+    .map((item) => {
+      const gone = session.matched.includes(item.id);
+      const selected = session.matchSel && session.matchSel.side === item.side && session.matchSel.id === item.id;
+      const bad = session.badPair && session.badPair.includes(item.id);
+      const cls = `match-cell${gone ? " is-gone" : ""}${selected ? " is-on" : ""}${bad ? " is-wrong" : ""}`;
+      const script = item.script ? `<small class="script">${esc(item.script)}</small>` : "";
+      return `<button type="button" class="${cls}" data-action="pair" data-pair="${item.side}:${esc(item.id)}" ${gone || session.feedback ? "disabled" : ""}><span>${esc(item.text)}</span>${script}</button>`;
+    })
+    .join("");
+  return `
+    <p class="prompt-label">${esc(step.promptLabel)}</p>
+    <div class="match-grid">${cells}</div>`;
 }
 
 function renderDone(course) {
-  const result = session.result;
-  const unit = currentUnit();
-  const lessonId = session.lessonId;
-  const lines = [];
-  lines.push(result.first ? "Nice." : "Nice practice.");
-  if (result.awarded) lines.push(`+${result.awarded} XP`);
-  else lines.push("XP for this one is already saved.");
-  if (result.streakNote) {
-    lines.push(`${result.streakNote} ${result.streakNote === 1 ? "day" : "days"} in a row`);
-  }
-  if (result.goalJustMet) lines.push("Daily goal done.");
-  const unitIndex = unit ? course.units.findIndex((item) => item.id === unit.id) : -1;
+  const result = session.result || {};
+  const nodes = coursePath(course);
+  const index = nodes.findIndex((node) => node.id === session.lessonId);
+  const node = nodes[index];
+  const unitNodes = nodes.filter((item) => item.unitId === session.unitId && item.kind !== "sounds");
   const unitJustDone =
-    unit && result.first && unitCoreComplete(state, course.id, unit.id) && CORE_LESSONS.includes(lessonId);
+    !session.practice &&
+    node &&
+    unitNodes.length > 0 &&
+    unitNodes[unitNodes.length - 1].id === session.lessonId &&
+    unitNodes.every((item) => isNodeDone(state, course, item));
+  const lines = [];
+  lines.push(result.heart ? "Heart earned." : result.first ? "Nice." : "Nice practice.");
+  if (result.awarded) lines.push(`+${result.awarded} XP`);
+  else if (!result.heart) lines.push("XP for this one is already saved.");
+  if (result.streakNote) lines.push(`${result.streakNote} ${result.streakNote === 1 ? "day" : "days"} in a row`);
+  if (result.goalJustMet) lines.push("Daily goal done.");
   if (unitJustDone) {
-    lines.push(unitIndex < course.units.length - 1 ? "This unit is done. The next one is open." : "That's the last unit in this course.");
+    const more = nodes.some((item, itemIndex) => itemIndex > index && item.kind !== "sounds");
+    lines.push(more ? "This unit is done. The next one is open." : "That's the last unit in this course.");
   }
-  if (session.wrongs > 0 && lessonId !== "review" && lessonId !== "intro") {
-    lines.push("Review can pick up the ones that slipped.");
-  }
-
-  let primary = session.unitId === "sounds" ? "Back to the path" : "Back to the lessons";
-  let goesOn = false;
-  if (session.unitId !== "sounds" && unit) {
-    const next = nextLessonId(state, course.id, unit);
-    const misses = missCountForUnit(state, course.id, unit);
-    if (next && next !== "review") {
-      const meta = LESSON_META.find((item) => item.id === next);
-      primary = `Next: ${meta.title}`;
-      goesOn = true;
-    } else if (next === "review" && lessonId !== "review" && (session.wrongs > 0 || misses > 0)) {
-      primary = "Review those";
-      goesOn = true;
-    }
-  }
-  const stop = goesOn ? `<button type="button" class="text" data-action="done-stop">Stop here</button>` : "";
+  const next = nodes[index + 1];
+  const canNext = Boolean(next && !session.practice && heartStatus(state, Date.now()).hearts > 0);
+  const primary = canNext ? `Next: ${next.title}` : "Back to the path";
+  const stop = canNext ? `<button type="button" class="text" data-action="done-stop">Stop here</button>` : "";
   const burst = motionOk()
     ? `<canvas class="confetti" data-kind="${result.goalJustMet ? "goal" : "lesson"}" aria-hidden="true"></canvas>`
     : "";
-  const reward = unitJustDone ? rewardFor(course, unitIndex) : null;
+  const reward = unitJustDone ? rewardFor(course, node.unitIndex) : null;
   const poster = reward
     ? `<figure class="reward"><img src="${esc(reward.src)}" alt="${esc(reward.alt)}" width="720" height="960"></figure>`
     : "";
@@ -1140,10 +1326,7 @@ function renderDone(course) {
     <main class="main lesson done">
       ${poster}
       <div class="celebrate">${checkSvg(true)}<h2>${esc(lines[0])}</h2></div>
-      <ul class="done-lines">${lines
-        .slice(1)
-        .map((line) => `<li>${esc(line)}</li>`)
-        .join("")}</ul>
+      <ul class="done-lines">${lines.slice(1).map((line) => `<li>${esc(line)}</li>`).join("")}</ul>
     </main>
     <footer class="dock">
       <button type="button" class="primary" data-action="done-next">${esc(primary)}</button>

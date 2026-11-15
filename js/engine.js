@@ -1,4 +1,5 @@
 // Lesson building and saved-progress rules. No browser APIs, so it can be checked on its own.
+import { COURSES } from "./courses.js";
 
 export const DAILY_GOAL = 20;
 
@@ -8,6 +9,9 @@ export const LESSON_XP = {
   practice: 12,
   listen: 12,
   review: 8,
+  lesson: 15,
+  checkpoint: 12,
+  heart: 5,
 };
 
 export const CORE_LESSONS = ["learn", "practice", "listen"];
@@ -46,6 +50,7 @@ export function blankState() {
     goalNotedDay: null,
     done: {},
     misses: {},
+    heartsLost: [],
     installHintDismissed: false,
   };
 }
@@ -74,8 +79,9 @@ export function normalizeState(raw) {
     dailyDay: typeof raw.dailyDay === "string" ? raw.dailyDay : null,
     dailyXp: Number.isFinite(raw.dailyXp) ? raw.dailyXp : 0,
     goalNotedDay: typeof raw.goalNotedDay === "string" ? raw.goalNotedDay : null,
-    done: raw.done && typeof raw.done === "object" ? { ...raw.done } : {},
+    done: migrateDone(raw.done && typeof raw.done === "object" ? { ...raw.done } : {}),
     misses: raw.misses && typeof raw.misses === "object" ? { ...raw.misses } : {},
+    heartsLost: Array.isArray(raw.heartsLost) ? raw.heartsLost.filter((t) => Number.isFinite(t)) : [],
     installHintDismissed: Boolean(raw.installHintDismissed),
   };
 }
@@ -93,7 +99,11 @@ export function isLessonDone(state, courseId, unitId, lessonId) {
 }
 
 export function unitCoreComplete(state, courseId, unitId) {
-  return CORE_LESSONS.every((id) => isLessonDone(state, courseId, unitId, id));
+  if (CORE_LESSONS.every((id) => isLessonDone(state, courseId, unitId, id))) return true;
+  const course = COURSES.find((item) => item.id === courseId);
+  if (!course) return false;
+  const nodes = coursePath(course).filter((node) => node.unitId === unitId);
+  return nodes.length > 0 && nodes.every((node) => isNodeDone(state, course, node));
 }
 
 export function unitUnlocked(state, course, index) {
@@ -121,6 +131,7 @@ function clone(state) {
     ...state,
     done: { ...state.done },
     misses: { ...state.misses },
+    heartsLost: [...(state.heartsLost || [])],
   };
 }
 
@@ -402,4 +413,302 @@ export function toneContour(tone) {
 
 export function speechForTone(tone) {
   return TONE_SPEECH[tone] ?? TONE_SPEECH[0];
+}
+
+export const MAX_HEARTS = 5;
+export const HEART_REFILL_MS = 30 * 60 * 1000;
+
+const CHUNK = 5;
+
+export function coursePath(course) {
+  const nodes = [];
+  course.units.forEach((unit, unitIndex) => {
+    for (let start = 0, part = 1; start < unit.phrases.length; start += CHUNK, part += 1) {
+      const chunk = unit.phrases.slice(start, start + CHUNK);
+      const title = chunk[0].en.replace(/[?？…]/g, "").split("/")[0].trim();
+      nodes.push({
+        id: `${unit.id}-${part}`,
+        unitId: unit.id,
+        unitIndex,
+        kind: "lesson",
+        title,
+        phraseIds: chunk.map((phrase) => phrase.id),
+      });
+    }
+    nodes.push({
+      id: `${unit.id}-check`,
+      unitId: unit.id,
+      unitIndex,
+      kind: "checkpoint",
+      title: "Review",
+      phraseIds: [],
+    });
+    if (unitIndex === 0) {
+      nodes.push({
+        id: "sounds",
+        unitId: "sounds",
+        unitIndex: 0,
+        kind: "sounds",
+        title: course.sounds.title,
+        phraseIds: [],
+      });
+    }
+  });
+  return nodes;
+}
+
+function migrateDone(done) {
+  const next = { ...done };
+  for (const course of COURSES) {
+    const intro = lessonKey(course.id, "sounds", "intro");
+    if (next[intro]) next[lessonKey(course.id, "sounds", "sounds")] = next[lessonKey(course.id, "sounds", "sounds")] || next[intro];
+    for (const unit of course.units) {
+      const nodes = coursePath(course).filter((node) => node.unitId === unit.id);
+      const core = CORE_LESSONS.every((id) => next[lessonKey(course.id, unit.id, id)]);
+      if (core) {
+        const stamp = next[lessonKey(course.id, unit.id, "learn")] || true;
+        for (const node of nodes) {
+          const key = lessonKey(course.id, unit.id, node.id);
+          next[key] = next[key] || stamp;
+        }
+        continue;
+      }
+      const lessons = nodes.filter((node) => node.kind === "lesson");
+      ["learn", "practice", "listen"].forEach((oldId, index) => {
+        const node = lessons[index];
+        const oldKey = lessonKey(course.id, unit.id, oldId);
+        if (!node || !next[oldKey]) return;
+        const key = lessonKey(course.id, unit.id, node.id);
+        next[key] = next[key] || next[oldKey];
+      });
+    }
+  }
+  return next;
+}
+
+export function isNodeDone(state, course, node) {
+  if (state.done[lessonKey(course.id, node.unitId, node.id)]) return true;
+  if (node.kind === "sounds") return Boolean(state.done[lessonKey(course.id, "sounds", "intro")]);
+  const unitNodes = coursePath(course).filter((item) => item.unitId === node.unitId);
+  const core = CORE_LESSONS.every((id) => state.done[lessonKey(course.id, node.unitId, id)]);
+  if (core) return true;
+  const lessons = unitNodes.filter((item) => item.kind === "lesson");
+  const index = lessons.findIndex((item) => item.id === node.id);
+  const oldId = ["learn", "practice", "listen"][index];
+  return Boolean(oldId && state.done[lessonKey(course.id, node.unitId, oldId)]);
+}
+
+export function nodeUnlocked(state, course, index) {
+  const nodes = coursePath(course);
+  if (index <= 0) return true;
+  return isNodeDone(state, course, nodes[index - 1]);
+}
+
+export function heartStatus(state, now = Date.now()) {
+  const lost = (state.heartsLost || [])
+    .filter((stamp) => now < Number(stamp) + HEART_REFILL_MS)
+    .sort((a, b) => a - b);
+  return {
+    hearts: Math.max(0, MAX_HEARTS - lost.length),
+    lost,
+    next: lost.length ? lost[0] + HEART_REFILL_MS : null,
+  };
+}
+
+export function refreshHearts(state, now = Date.now()) {
+  const next = clone(state);
+  next.heartsLost = heartStatus(state, now).lost;
+  return next;
+}
+
+export function loseHeart(state, now = Date.now()) {
+  const status = heartStatus(state, now);
+  if (status.hearts <= 0) return { state: refreshHearts(state, now), hearts: 0 };
+  const next = clone(state);
+  next.heartsLost = [...status.lost, now];
+  return { state: next, hearts: status.hearts - 1 };
+}
+
+export function gainHeart(state, now = Date.now()) {
+  const status = heartStatus(state, now);
+  const next = clone(state);
+  next.heartsLost = status.hearts >= MAX_HEARTS ? [] : status.lost.slice(1);
+  return next;
+}
+
+function dedupePhrases(list) {
+  const seen = new Set();
+  const out = [];
+  for (const phrase of list) {
+    if (!phrase || seen.has(phrase.id)) continue;
+    seen.add(phrase.id);
+    out.push(phrase);
+  }
+  return out;
+}
+
+function wordsOf(roman) {
+  const clean = String(roman || "").replace(/[…?.？。!！]/g, "").trim();
+  const parts = clean.split(/\s+/).filter(Boolean);
+  return parts.length ? parts : [clean || String(roman)];
+}
+
+function choiceStepNew(phrase, direction, pool, rng) {
+  const answerText = direction === "toRoman" ? phrase.roman : phrase.en;
+  const field = direction === "toRoman" ? "roman" : "en";
+  const distractors = uniqueOptions(
+    pool
+      .filter((item) => item.id !== phrase.id)
+      .map((item) => ({ id: item.id, text: item[field], script: item.script })),
+    answerText,
+    3,
+    rng,
+  );
+  return {
+    type: "choice",
+    phraseId: phrase.id,
+    direction,
+    prompt: direction === "toRoman" ? phrase.en : phrase.roman,
+    promptScript: direction === "toEn" ? phrase.script : "",
+    promptLabel: direction === "toRoman" ? "How do you say this?" : "What does this mean?",
+    options: rng.shuffle([{ id: phrase.id, text: answerText, script: phrase.script }, ...distractors]),
+    answerId: phrase.id,
+  };
+}
+
+function listenStep(phrase, pool, rng) {
+  const distractors = uniqueOptions(
+    pool.filter((item) => item.id !== phrase.id).map((item) => ({ id: item.id, text: item.en })),
+    phrase.en,
+    3,
+    rng,
+  );
+  return {
+    type: "listen",
+    phraseId: phrase.id,
+    promptLabel: "What did you hear?",
+    options: rng.shuffle([{ id: phrase.id, text: phrase.en }, ...distractors]),
+    answerId: phrase.id,
+  };
+}
+
+function tileStep(phrase, pool, rng) {
+  const answer = wordsOf(phrase.roman);
+  const used = new Set(answer);
+  const distractors = [];
+  for (const other of rng.shuffle(pool)) {
+    if (other.id === phrase.id) continue;
+    for (const word of wordsOf(other.roman)) {
+      if (used.has(word)) continue;
+      used.add(word);
+      distractors.push(word);
+      if (distractors.length === 3) break;
+    }
+    if (distractors.length === 3) break;
+  }
+  return {
+    type: "tiles",
+    phraseId: phrase.id,
+    prompt: phrase.en,
+    promptLabel: "Tap the words in order",
+    answer,
+    tiles: rng.shuffle([...answer, ...distractors]),
+  };
+}
+
+function matchStep(phrases) {
+  return {
+    type: "match",
+    phraseId: phrases[0]?.id || null,
+    promptLabel: "Tap the matching pairs",
+    pairs: phrases.slice(0, 5).map((phrase) => ({
+      id: phrase.id,
+      roman: phrase.roman,
+      en: phrase.en,
+      script: phrase.script,
+    })),
+  };
+}
+
+function buildMix(title, fresh, pool, rng) {
+  const intro = fresh.map((phrase) => choiceStepNew(phrase, "toRoman", pool, rng));
+  const cycle = ["listen", "tiles", "toEn"];
+  const rest = [];
+  const want = Math.max(8, 17 - intro.length);
+  let guard = 0;
+  while (rest.length < want && guard < 90) {
+    const phrase = pool[guard % pool.length];
+    const kind = cycle[guard % cycle.length];
+    if (kind === "listen") rest.push(listenStep(phrase, pool, rng));
+    else if (kind === "tiles") rest.push(tileStep(phrase, pool, rng));
+    else rest.push(choiceStepNew(phrase, "toEn", pool, rng));
+    guard += 1;
+  }
+  const maxBody = 20 - intro.length - 1;
+  let body = rest.slice(0, Math.max(0, maxBody));
+  while (intro.length + body.length + 1 < 15) {
+    body.push(choiceStepNew(pool[body.length % pool.length], "toEn", pool, rng));
+  }
+  if (intro.length + body.length + 1 > 20) body = body.slice(0, 20 - intro.length - 1);
+  const match = matchStep(rng.shuffle(pool).slice(0, Math.min(5, pool.length)));
+  const mid = Math.max(0, Math.floor(body.length / 2));
+  return {
+    kind: "mix",
+    title,
+    steps: [...intro, ...body.slice(0, mid), match, ...body.slice(mid)].slice(0, 20),
+  };
+}
+
+export function buildNodeLesson(course, node, state, random = Math.random) {
+  if (node.kind === "sounds") return buildSoundsLesson(course, random);
+  const rng = makeRng(random);
+  const all = course.units.flatMap((unit) => unit.phrases);
+  const byId = new Map(all.map((phrase) => [phrase.id, phrase]));
+  const path = coursePath(course);
+  const index = path.findIndex((item) => item.unitId === node.unitId && item.id === node.id);
+  const earlierIds = new Set(path.slice(0, Math.max(0, index)).flatMap((item) => item.phraseIds || []));
+  const earlier = all.filter((phrase) => earlierIds.has(phrase.id));
+  const weak = earlier
+    .filter((phrase) => (state.misses[missKey(course.id, phrase.id)] || 0) > 0)
+    .sort(
+      (a, b) =>
+        (state.misses[missKey(course.id, b.id)] || 0) - (state.misses[missKey(course.id, a.id)] || 0),
+    );
+  let fresh = [];
+  let pool = [];
+  if (node.kind === "checkpoint") {
+    const unit = course.units.find((item) => item.id === node.unitId);
+    pool = dedupePhrases([
+      ...weak.filter((phrase) => unit.phrases.some((item) => item.id === phrase.id)),
+      ...rng.shuffle(unit.phrases),
+      ...weak,
+      ...rng.shuffle(earlier),
+    ]).slice(0, 10);
+  } else {
+    fresh = node.phraseIds.map((id) => byId.get(id)).filter(Boolean);
+    const review = dedupePhrases([...weak, ...rng.shuffle(earlier)])
+      .filter((phrase) => !node.phraseIds.includes(phrase.id))
+      .slice(0, 5);
+    pool = dedupePhrases([...fresh, ...review]);
+  }
+  if (pool.length < 5) pool = dedupePhrases([...pool, ...rng.shuffle(all)]).slice(0, 5);
+  return buildMix(node.title, fresh, pool, rng);
+}
+
+export function buildHeartPractice(course, state, random = Math.random) {
+  const rng = makeRng(random);
+  const all = course.units.flatMap((unit) => unit.phrases);
+  const weak = all
+    .filter((phrase) => (state.misses[missKey(course.id, phrase.id)] || 0) > 0)
+    .sort(
+      (a, b) =>
+        (state.misses[missKey(course.id, b.id)] || 0) - (state.misses[missKey(course.id, a.id)] || 0),
+    );
+  const pool = dedupePhrases([...weak, ...rng.shuffle(all)]).slice(0, 8);
+  const steps = [];
+  pool.forEach((phrase, index) => {
+    steps.push(index % 2 === 0 ? choiceStepNew(phrase, "toEn", pool, rng) : listenStep(phrase, pool, rng));
+  });
+  while (steps.length < 10) steps.push(tileStep(pool[steps.length % pool.length], pool, rng));
+  return { kind: "mix", title: "Practice", steps: steps.slice(0, 10), practice: true };
 }

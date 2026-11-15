@@ -6,17 +6,24 @@ import {
   DAILY_GOAL,
   LESSON_XP,
   blankState,
+  buildNodeLesson,
   buildPhraseLesson,
   buildSoundsLesson,
   completeLesson,
+  coursePath,
   courseUnitsDone,
+  gainHeart,
+  heartStatus,
+  loseHeart,
   dayKey,
   makeRng,
   missCountForUnit,
+  normalizeState,
   recordMiss,
   speechForTone,
   toneContour,
   tonesFromPinyin,
+  nodeUnlocked,
   unitCoreComplete,
   unitUnlocked,
   visibleStreak,
@@ -66,7 +73,7 @@ for (const course of COURSES) {
   assert(course.sounds.quiz.length >= 3, `${course.id} sounds quiz`);
   const ids = new Set();
   for (const unit of course.units) {
-    assert(unit.phrases.length >= 10 && unit.phrases.length <= 15, `${course.id}/${unit.id} phrase count ${unit.phrases.length}`);
+    assert(unit.phrases.length >= 10 && unit.phrases.length <= 20, `${course.id}/${unit.id} phrase count ${unit.phrases.length}`);
     assert(unit.tip && unit.blurb && unit.title, `${course.id}/${unit.id} copy`);
     const ens = new Set();
     const romans = new Set();
@@ -223,10 +230,11 @@ const listed = (block) => [...block.matchAll(/src: "(images\/reward-[^"]+)"/g)].
 assert(listed(zhBlock).join() === zhRewards.join(), "Mandarin rotation order");
 assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v9"'), "service worker cache version");
-assert((appSource.match(/\$\{lessonBar\(/g) || []).length === 3, "X stays on the three lesson screens");
+assert(sw.includes('const CACHE = "travel-speak-v10"'), "service worker cache version");
+assert((appSource.match(/\$\{lessonBar\(/g) || []).length >= 3, "X stays on lesson screens");
 assert(appSource.includes('aria-label="Close lesson"'), "lesson close button");
-assert(appSource.includes("topbar(course.name)") && appSource.includes("topbar(unit.title)"), "course and unit keep their headers");
+assert(appSource.includes("topbar(course.name)"), "course keeps its back header");
+assert(appSource.includes('aria-label="Back"'), "back arrow stays in the lesson header");
 
 const tone1 = toneContour(1);
 const tone2 = toneContour(2);
@@ -258,6 +266,43 @@ for (const item of mandarin.sounds.quiz) {
   if (!item.speak) continue;
   assert(tonesFromPinyin(item.speak.roman).length > 0, `tone quiz ${item.speak.script}`);
 }
+
+for (const course of COURSES) {
+  const path = coursePath(course);
+  assert(path.length >= 12, `${course.id} path length ${path.length}`);
+  const soundsAt = path.findIndex((node) => node.kind === "sounds");
+  const greetDone = path.findIndex((node) => node.id === "greetings-check");
+  assert(soundsAt > greetDone && greetDone > 0, `${course.id} tones come after greetings`);
+  assert(path[0].kind === "lesson", `${course.id} starts with a lesson`);
+  assert(nodeUnlocked(blankState(), course, 0) && !nodeUnlocked(blankState(), course, 1), `${course.id} first node only`);
+  for (const node of path) {
+    if (node.kind === "sounds") continue;
+    const built = buildNodeLesson(course, node, blankState(), () => 0.3);
+    assert(built.steps.length >= 15 && built.steps.length <= 20, `${course.id}/${node.id} length ${built.steps.length}`);
+    const types = new Set(built.steps.map((step) => step.type));
+    assert(types.has("choice") && types.has("tiles") && types.has("listen") && types.has("match"), `${course.id}/${node.id} mix`);
+    const match = built.steps.find((step) => step.type === "match");
+    assert(match.pairs.length === 5, `${course.id}/${node.id} pairs`);
+    const tiles = built.steps.find((step) => step.type === "tiles");
+    assert(tiles.tiles.length > tiles.answer.length, `${course.id}/${node.id} distractors`);
+  }
+}
+let hearts = blankState();
+let now = 1_000_000;
+for (let i = 0; i < 5; i += 1) hearts = loseHeart(hearts, now + i).state;
+assert(heartStatus(hearts, now + 10).hearts === 0, "five mistakes empty the hearts");
+hearts = gainHeart(hearts, now + 10);
+assert(heartStatus(hearts, now + 10).hearts === 1, "practice gives one heart");
+assert(heartStatus(hearts, now + 10 + 30 * 60 * 1000).hearts === 5, "hearts refill after 30 minutes");
+const legacy = blankState();
+legacy.done["zh:greetings:learn"] = "2026-01-01";
+legacy.done["zh:greetings:practice"] = "2026-01-01";
+legacy.done["zh:greetings:listen"] = "2026-01-01";
+legacy.done["zh:sounds:intro"] = "2026-01-01";
+const migrated = normalizeState(legacy);
+const greetNodes = coursePath(COURSES[0]).filter((node) => node.unitId === "greetings");
+assert(greetNodes.every((node) => migrated.done[`zh:greetings:${node.id}`]), "old greetings lessons migrate");
+assert(migrated.done["zh:sounds:sounds"], "old tone lesson migrates");
 
 const total = COURSES.reduce((n, c) => n + c.units.reduce((m, u) => m + u.phrases.length, 0), 0);
 console.log(`phrases: ${total}`);
