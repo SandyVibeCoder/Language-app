@@ -2,23 +2,20 @@ import { COURSES, courseById, unitById } from "./courses.js";
 import {
   DAILY_GOAL,
   blankState,
-  buildHeartPractice,
+  MAX_HEARTS,
   buildNodeLesson,
+  canQueueRepeat,
   completeLesson,
   coursePath,
   dailyXp,
   dayKey,
   dismissInstallHint,
   easeMiss,
-  gainHeart,
-  heartStatus,
   isNodeDone,
-  loseHeart,
   nodeUnlocked,
   normalizeState,
   phraseById,
   recordMiss,
-  refreshHearts,
   speakText,
   speechForTone,
   toneContour,
@@ -346,8 +343,6 @@ function currentCourse() {
   return view.courseId ? courseById(view.courseId) : null;
 }
 
-let heartTimer = 0;
-
 function currentNode() {
   const course = currentCourse();
   if (!course || !view.lessonId) return null;
@@ -367,8 +362,14 @@ function answerLine(course, step) {
 
 function queueRepeat(step) {
   if (!step || session.queued?.[step.uid]) return;
+  if (!canQueueRepeat(session.built.steps)) return;
   session.queued[step.uid] = true;
   session.built.steps.push({ ...step, uid: `${step.uid}r`, repeat: true });
+}
+
+function spendHeart() {
+  session.hearts = Math.max(0, (session.hearts ?? MAX_HEARTS) - 1);
+  if (session.hearts <= 0) session.failed = true;
 }
 
 function grade(ok) {
@@ -378,16 +379,8 @@ function grade(ok) {
   if (step.phraseId) save(ok ? easeMiss(state, session.courseId, step.phraseId) : recordMiss(state, session.courseId, step.phraseId));
   if (!ok) {
     session.wrongs += 1;
-    queueRepeat(step);
-    if (!session.practice) {
-      const lost = loseHeart(state, Date.now());
-      save(lost.state);
-      if (lost.hearts <= 0) {
-        session.phase = "hearts";
-        render();
-        return;
-      }
-    }
+    spendHeart();
+    if (!session.failed) queueRepeat(step);
   }
   render();
 }
@@ -405,8 +398,7 @@ function advance() {
   session.voice = "idle";
   session.index += 1;
   if (!currentStep()) {
-    if (session.practice) finishPractice();
-    else finishLesson();
+    finishLesson();
     return;
   }
   session.phase = "run";
@@ -432,6 +424,8 @@ function beginBuilt(courseId, unitId, lessonId, nodeKind, built, practice) {
     badPair: null,
     matchOrder: null,
     queued: {},
+    hearts: MAX_HEARTS,
+    failed: false,
     voice: "idle",
     wrongs: 0,
     result: null,
@@ -457,65 +451,15 @@ function startNode(courseId, nodeId) {
   const index = nodes.findIndex((node) => node.id === nodeId);
   const node = nodes[index];
   if (!node || !nodeUnlocked(state, course, index)) return;
-  save(refreshHearts(state, Date.now()));
-  if (heartStatus(state, Date.now()).hearts <= 0) {
-    stopSpeech();
-    session = {
-      courseId,
-      unitId: node.unitId,
-      lessonId: node.id,
-      phase: "hearts",
-      gated: true,
-      practice: false,
-      built: { title: "Hearts", steps: [] },
-      wrongs: 0,
-    };
-    view = { name: "lesson", courseId, unitId: node.unitId, lessonId: node.id };
-    writeHistory("push");
-    resetScroll = true;
-    render();
-    return;
-  }
   beginNode(courseId, node);
   writeHistory("push");
 }
 
-function startHeartPractice() {
-  const course = currentCourse();
-  const paused = session?.built?.steps?.length && !session.practice ? session : null;
-  beginBuilt(course.id, "practice", "heart", "heart", buildHeartPractice(course, state), true);
-  session.resume = paused;
-  writeHistory("push");
-}
-
-function finishPractice() {
-  save(gainHeart(refreshHearts(state, Date.now()), Date.now()));
-  const result = completeLesson(state, {
-    courseId: session.courseId,
-    unitId: "practice",
-    lessonId: "heart",
-    xp: 5,
-    today: dayKey(),
-  });
-  save(result.state);
-  const resume = session.resume;
-  if (resume?.built?.steps) {
-    session = resume;
-    session.feedback = null;
-    session.tiles = [];
-    session.matchSel = null;
-    session.phase = "run";
-    session.index += 1;
-    if (!currentStep()) finishLesson();
-    else render();
-    return;
-  }
-  session.phase = "done";
-  session.result = { ...result, heart: true };
-  session.practice = true;
+function retryLesson() {
+  const node = currentNode();
+  if (!node || !session?.courseId) return;
+  beginNode(session.courseId, node);
   writeHistory("replace");
-  resetScroll = true;
-  render();
 }
 
 function screenSnapshot() {
@@ -614,29 +558,10 @@ function showHistory(saved) {
       goHome();
       return;
     }
-    if (saved.lessonId === "heart") {
-      beginBuilt(saved.courseId, "practice", "heart", "heart", buildHeartPractice(course, state), true);
-      return;
-    }
     const node = coursePath(course).find((item) => item.id === saved.lessonId);
     if (!node) {
       view = { name: "course", courseId: saved.courseId };
       session = null;
-      render();
-      return;
-    }
-    if (heartStatus(refreshHearts(state, Date.now()), Date.now()).hearts <= 0) {
-      session = {
-        courseId: saved.courseId,
-        unitId: node.unitId,
-        lessonId: node.id,
-        phase: "hearts",
-        gated: true,
-        practice: false,
-        built: { title: "Hearts", steps: [] },
-        wrongs: 0,
-      };
-      view = { name: "lesson", courseId: saved.courseId, unitId: node.unitId, lessonId: node.id };
       render();
       return;
     }
@@ -694,7 +619,7 @@ function onClick(event) {
   }
   if (action === "course") return goCourse(el.dataset.course);
   if (action === "node") return startNode(view.courseId, el.dataset.node);
-  if (action === "heart-practice") return startHeartPractice();
+  if (action === "retry") return retryLesson();
   if (action === "dismiss-install") {
     save(dismissInstallHint(state));
     render();
@@ -705,7 +630,6 @@ function onClick(event) {
     if (action === "done-stop") return afterLesson(false);
     return;
   }
-  if (session.phase === "hearts") return;
 
   if (action === "replay" || action === "play" || action === "slow" || action === "example") {
     event.preventDefault();
@@ -781,21 +705,18 @@ function onClick(event) {
     session.badPair = [session.matchSel.id, id];
     session.matchSel = null;
     session.wrongs += 1;
-    if (!session.practice) {
-      const lost = loseHeart(state, Date.now());
-      save(lost.state);
-      if (lost.hearts <= 0) {
-        queueRepeat(currentStep());
-        session.phase = "hearts";
-        render();
-        return;
-      }
+    spendHeart();
+    if (session.failed) {
+      session.feedback = { ok: false, line: "Out of hearts. This lesson stops here." };
+      render();
+      return;
     }
     render();
     return;
   }
   if (action === "next" || action === "continue") {
     const step = currentStep();
+    if (session.failed) return;
     if (step?.type === "slide" || session.feedback) advance();
   }
 }
@@ -806,7 +727,7 @@ function afterLesson(goOn) {
   const index = nodes.findIndex((node) => node.id === session.lessonId);
   const next = nodes[index + 1];
   stopSpeech();
-  if (goOn && next && !session.practice && heartStatus(state, Date.now()).hearts > 0) {
+  if (goOn && next && !session.failed) {
     startNode(course.id, next.id);
     return;
   }
@@ -940,30 +861,13 @@ function render() {
     const phrase = findPhrase(course, step.phraseId);
     if (phrase) playLine(speakText(phrase), course.voice, phrase.roman);
   }
-  armHearts();
-}
-
-function armHearts() {
-  window.clearTimeout(heartTimer);
-  const status = heartStatus(state, Date.now());
-  if (!status.next) return;
-  const wait = Math.max(800, status.next - Date.now() + 40);
-  heartTimer = window.setTimeout(() => {
-    save(refreshHearts(state, Date.now()));
-    render();
-  }, Math.min(wait, 60 * 60 * 1000));
 }
 
 function heartRow() {
-  const now = Date.now();
-  const status = heartStatus(state, now);
-  const icons = Array.from({ length: 5 }, (_, index) => `<span class="heart ${index < status.hearts ? "on" : "off"}">♥</span>`).join("");
-  let label = `${status.hearts} of 5 hearts`;
-  if (status.next) {
-    const mins = Math.max(1, Math.ceil((status.next - now) / 60000));
-    label = mins === 1 ? "Next heart in 1 minute" : `Next heart in ${mins} minutes`;
-  }
-  return `<div class="hearts" aria-label="${status.hearts} of 5 hearts"><span class="heart-icons">${icons}</span><span>${esc(label)}</span></div>`;
+  const hearts = session?.hearts ?? MAX_HEARTS;
+  const icons = Array.from({ length: MAX_HEARTS }, (_, index) => `<span class="heart ${index < hearts ? "on" : "off"}">♥</span>`).join("");
+  const label = `${hearts} of ${MAX_HEARTS} hearts`;
+  return `<div class="hearts" aria-label="${label}"><span class="heart-icons">${icons}</span><span>${esc(label)}</span></div>`;
 }
 
 function banner() {
@@ -1004,7 +908,6 @@ function renderHome() {
         </div>
         <span>${esc(goalLabel)}</span>
       </div>
-      ${heartRow()}
       <div class="course-list">
         ${COURSES.map((course) => courseCard(course)).join("")}
       </div>
@@ -1063,16 +966,11 @@ function renderCourse(course) {
       </li>`;
     })
     .join("");
-  const empty = heartStatus(state, Date.now()).hearts <= 0
-    ? `<button type="button" class="secondary" data-action="heart-practice">Practice for a heart</button>`
-    : "";
   return `
     ${topbar(course.name)}
     <main class="main path-main">
       ${banner()}
-      ${heartRow()}
       <p class="lede tight">${esc(course.blurb)}</p>
-      ${empty}
       <ol class="winding">${rows}</ol>
     </main>`;
 }
@@ -1103,7 +1001,6 @@ function lessonBar(title) {
 
 function renderLesson(course) {
   if (!session) return renderCourse(course);
-  if (session.phase === "hearts") return renderHearts(course);
   if (session.phase === "done") return renderDone(course);
   return renderQuestion(course);
 }
@@ -1117,22 +1014,6 @@ function feedbackBlock() {
   if (!session.feedback) return "";
   const ok = session.feedback.ok;
   return `<div class="feedback ${ok ? "ok" : "bad"}" role="status"><strong>${ok ? "Nice." : "Not quite."}</strong><p>${esc(session.feedback.line)}</p></div>`;
-}
-
-function renderHearts(course) {
-  const status = heartStatus(state, Date.now());
-  const mins = status.next ? Math.max(1, Math.ceil((status.next - Date.now()) / 60000)) : 30;
-  return `
-    ${lessonBar("Hearts")}
-    <main class="main lesson">
-      ${heartRow()}
-      <h2>Out of hearts</h2>
-      <p>A heart comes back every 30 minutes. The next one is in about ${mins} ${mins === 1 ? "minute" : "minutes"}.</p>
-      <p>Or practice a few questions and earn one now. Nothing to buy.</p>
-    </main>
-    <footer class="dock">
-      <button type="button" class="primary" data-action="heart-practice">Practice for a heart</button>
-    </footer>`;
 }
 
 function renderQuestion(course) {
@@ -1149,10 +1030,14 @@ function renderQuestion(course) {
   const showContinue = step?.type === "slide" || session.feedback;
   const tileReady = step?.type === "tiles" && session.tiles.length === step.answer.length;
   const showCheck = step?.type === "tiles" && !session.feedback;
+  const continueLabel = session.failed ? "Try again" : session.index === total - 1 ? "Finish" : "Continue";
+  const continueAction = session.failed ? "retry" : "continue";
+  const leave = session.failed ? `<button type="button" class="text" data-action="done-stop">Back to the path</button>` : "";
   const dock = `
     ${feedbackBlock()}
     ${showCheck ? `<button type="button" class="primary" data-action="check" ${tileReady ? "" : "disabled"}>Check</button>` : ""}
-    ${showContinue ? `<button type="button" class="primary" data-action="continue">${session.index === total - 1 ? "Finish" : "Continue"}</button>` : ""}`;
+    ${showContinue ? `<button type="button" class="primary" data-action="${continueAction}">${continueLabel}</button>` : ""}
+    ${leave}`;
   return `
     ${lessonBar(session.built.title)}
     ${lessonProgress(session.index, total)}
@@ -1300,9 +1185,9 @@ function renderDone(course) {
     unitNodes[unitNodes.length - 1].id === session.lessonId &&
     unitNodes.every((item) => isNodeDone(state, course, item));
   const lines = [];
-  lines.push(result.heart ? "Heart earned." : result.first ? "Nice." : "Nice practice.");
+  lines.push(result.first ? "Nice." : "Nice practice.");
   if (result.awarded) lines.push(`+${result.awarded} XP`);
-  else if (!result.heart) lines.push("XP for this one is already saved.");
+  else lines.push("XP for this one is already saved.");
   if (result.streakNote) lines.push(`${result.streakNote} ${result.streakNote === 1 ? "day" : "days"} in a row`);
   if (result.goalJustMet) lines.push("Daily goal done.");
   if (unitJustDone) {
@@ -1310,7 +1195,7 @@ function renderDone(course) {
     lines.push(more ? "This unit is done. The next one is open." : "That's the last unit in this course.");
   }
   const next = nodes[index + 1];
-  const canNext = Boolean(next && !session.practice && heartStatus(state, Date.now()).hearts > 0);
+  const canNext = Boolean(next);
   const primary = canNext ? `Next: ${next.title}` : "Back to the path";
   const stop = canNext ? `<button type="button" class="text" data-action="done-stop">Stop here</button>` : "";
   const burst = motionOk()

@@ -28,7 +28,7 @@ The workflow tries to turn Pages on by itself. GitHub often blocks that for the 
 - Mandarin for Taiwan, in pinyin with tone marks. Traditional characters are small, next to the answer.
 - Japanese for Japan, in romaji with macrons. Kana and kanji are small, next to the answer.
 - Each course is a path of lessons. A lesson mixes meaning questions, word tiles, listening, and matching pairs. Pinyin or romaji comes first. Characters stay small.
-- Five hearts. A mistake costs one, and a heart comes back every 30 minutes. If you run out, a free practice lesson earns one back. Nothing is for sale.
+- Five hearts at the start of each lesson. A mistake costs one. If they run out, the lesson stops and you can try it again. Nothing is for sale.
 - A little XP, a daily streak, and a daily goal of 20 XP. No ranking and no account.
 
 Phrases live in `js/courses.js` if you ever want to change a line.

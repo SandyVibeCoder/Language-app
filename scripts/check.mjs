@@ -10,11 +10,10 @@ import {
   buildPhraseLesson,
   buildSoundsLesson,
   completeLesson,
+  LESSON_LIMIT,
+  canQueueRepeat,
   coursePath,
   courseUnitsDone,
-  gainHeart,
-  heartStatus,
-  loseHeart,
   dayKey,
   makeRng,
   missCountForUnit,
@@ -230,8 +229,8 @@ const listed = (block) => [...block.matchAll(/src: "(images\/reward-[^"]+)"/g)].
 assert(listed(zhBlock).join() === zhRewards.join(), "Mandarin rotation order");
 assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v10"'), "service worker cache version");
-assert((appSource.match(/\$\{lessonBar\(/g) || []).length >= 3, "X stays on lesson screens");
+assert(sw.includes('const CACHE = "travel-speak-v11"'), "service worker cache version");
+assert((appSource.match(/\$\{lessonBar\(/g) || []).length >= 2, "X stays on lesson screens");
 assert(appSource.includes('aria-label="Close lesson"'), "lesson close button");
 assert(appSource.includes("topbar(course.name)"), "course keeps its back header");
 assert(appSource.includes('aria-label="Back"'), "back arrow stays in the lesson header");
@@ -278,7 +277,7 @@ for (const course of COURSES) {
   for (const node of path) {
     if (node.kind === "sounds") continue;
     const built = buildNodeLesson(course, node, blankState(), () => 0.3);
-    assert(built.steps.length >= 15 && built.steps.length <= 20, `${course.id}/${node.id} length ${built.steps.length}`);
+    assert(built.steps.length === 7 && built.steps.length < LESSON_LIMIT, `${course.id}/${node.id} length ${built.steps.length}`);
     const types = new Set(built.steps.map((step) => step.type));
     assert(types.has("choice") && types.has("tiles") && types.has("listen") && types.has("match"), `${course.id}/${node.id} mix`);
     const match = built.steps.find((step) => step.type === "match");
@@ -287,13 +286,16 @@ for (const course of COURSES) {
     assert(tiles.tiles.length > tiles.answer.length, `${course.id}/${node.id} distractors`);
   }
 }
-let hearts = blankState();
-let now = 1_000_000;
-for (let i = 0; i < 5; i += 1) hearts = loseHeart(hearts, now + i).state;
-assert(heartStatus(hearts, now + 10).hearts === 0, "five mistakes empty the hearts");
-hearts = gainHeart(hearts, now + 10);
-assert(heartStatus(hearts, now + 10).hearts === 1, "practice gives one heart");
-assert(heartStatus(hearts, now + 10 + 30 * 60 * 1000).hearts === 5, "hearts refill after 30 minutes");
+const sample = buildNodeLesson(COURSES[0], coursePath(COURSES[0])[0], blankState(), () => 0.2);
+assert(canQueueRepeat(sample.steps), "a fresh lesson can still repeat a miss");
+const capped = Array.from({ length: LESSON_LIMIT }, () => ({ type: "choice" }));
+assert(!canQueueRepeat(capped), "ten questions leave no room for another");
+const slides = [
+  ...Array.from({ length: 6 }, () => ({ type: "slide" })),
+  ...Array.from({ length: 9 }, () => ({ type: "choice" })),
+];
+assert(canQueueRepeat(slides), "slides do not count toward the question cap");
+assert(!canQueueRepeat([...slides, { type: "listen" }]), "the tenth question fills the lesson");
 const legacy = blankState();
 legacy.done["zh:greetings:learn"] = "2026-01-01";
 legacy.done["zh:greetings:practice"] = "2026-01-01";
