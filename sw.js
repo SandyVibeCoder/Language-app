@@ -1,4 +1,4 @@
-const CACHE = "travel-speak-v2";
+const CACHE = "travel-speak-v4";
 
 const ASSETS = [
   "./",
@@ -13,6 +13,9 @@ const ASSETS = [
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable.png",
+  "./images/reward-taiwan-beach.webp",
+  "./images/reward-japan-cherry.webp",
+  "./images/reward-japan-surf.webp",
 ];
 
 self.addEventListener("install", (event) => {

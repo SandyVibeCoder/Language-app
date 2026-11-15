@@ -47,15 +47,19 @@ button { cursor: pointer; }
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  position: relative;
+  /* Visible overflow so the card's 3D turn is not flattened. */
+  overflow: visible;
 }
 .main { padding: 8px 20px 28px; }
 #app.screen .main {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 12px;
 }
+#app.screen .main.cards { overflow: visible; }
 .home { padding-top: calc(22px + env(safe-area-inset-top)); padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
 h1 { font-size: 40px; line-height: 1.05; letter-spacing: -0.03em; margin: 0 0 8px; }
 h2 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8px; }
@@ -232,18 +236,47 @@ h2 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8p
 .lesson-list { display: flex; flex-direction: column; }
 .lesson-track { margin: 0 20px 4px; }
 .count { margin: 4px 0 10px; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
-.card {
-  background: var(--card);
-  border-radius: 24px;
+.flip-scene {
+  perspective: 900px;
+  -webkit-perspective: 900px;
   min-height: 42vh;
-  padding: 28px 22px;
-  box-shadow: var(--shadow);
+}
+.flip-card {
+  position: relative;
+  width: 100%;
+  min-height: 42vh;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+  transform: rotateY(0deg);
+  transition: transform 700ms ease-in-out;
+  cursor: pointer;
+}
+.flip-card.is-flipped { transform: rotateY(180deg); }
+.flip-face {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
   gap: 8px;
+  padding: 28px 22px;
+  background: var(--card);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.flip-front { transform: rotateY(0deg); }
+.flip-back { transform: rotateY(180deg); }
+.confetti {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 8;
 }
 .english { font-size: 34px; line-height: 1.15; letter-spacing: -0.03em; margin: 0; font-weight: 650; }
 .english.small { font-size: 20px; font-weight: 650; }
@@ -334,6 +367,18 @@ h2 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8p
 }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .done { display: flex; flex-direction: column; justify-content: center; }
+.reward { margin: 0 0 14px; }
+.reward img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: 34vh;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 16px;
+  border: 3px solid #fffaf4;
+  box-shadow: 0 10px 24px rgba(70, 44, 18, 0.16);
+}
 .celebrate { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .check.lg { width: 72px; height: 72px; color: var(--accent); }
 .done-lines { margin: 12px 0 0; padding: 0; list-style: none; font-size: 20px; }
