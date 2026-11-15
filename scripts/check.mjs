@@ -194,6 +194,9 @@ const rewardFiles = [
   "images/reward-taiwan-beach.webp",
   "images/reward-japan-cherry.webp",
   "images/reward-japan-surf.webp",
+  "images/reward-lantern-beach.webp",
+  "images/reward-hot-spring.webp",
+  "images/reward-sailboat.webp",
 ];
 const sw = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
 for (const file of rewardFiles) {
@@ -201,6 +204,29 @@ for (const file of rewardFiles) {
   assert(bytes > 1000 && bytes < 200 * 1024, `${file} is ${bytes} bytes`);
   assert(sw.includes(file), `${file} missing from the service worker`);
 }
+
+const appSource = readFileSync(new URL("../js/app.js", import.meta.url), "utf8");
+const posterSrcs = [...appSource.matchAll(/src: "(images\/reward-[^"]+)"/g)].map((match) => match[1]);
+assert(posterSrcs.length === rewardFiles.length, "rotation lists every poster once");
+assert(new Set(posterSrcs).size === posterSrcs.length, "rotation posters are unique");
+const offsetMatch = appSource.match(/REWARD_OFFSET = \{ zh: (\d+), ja: (\d+) \}/);
+assert(offsetMatch, "each course has a start in the poster list");
+const zhOffset = Number(offsetMatch[1]);
+const jaOffset = Number(offsetMatch[2]);
+const seenBy = (offset) => {
+  const seen = new Set();
+  for (let unit = 0; unit < 8; unit += 1) seen.add(posterSrcs[(unit + offset) % posterSrcs.length]);
+  return seen;
+};
+assert(seenBy(zhOffset).size === posterSrcs.length, "Mandarin uses every poster");
+assert(seenBy(jaOffset).size === posterSrcs.length, "Japanese uses every poster");
+let sharedSlots = 0;
+for (let unit = 0; unit < 8; unit += 1) {
+  if (posterSrcs[(unit + zhOffset) % posterSrcs.length] === posterSrcs[(unit + jaOffset) % posterSrcs.length]) {
+    sharedSlots += 1;
+  }
+}
+assert(sharedSlots < 8, "the two courses do not show the same poster on every unit");
 
 const total = COURSES.reduce((n, c) => n + c.units.reduce((m, u) => m + u.phrases.length, 0), 0);
 console.log(`phrases: ${total}`);
