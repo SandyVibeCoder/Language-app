@@ -878,27 +878,40 @@ function renderDone(course) {
     </footer>`;
 }
 
-const REWARDS = {
-  zh: {
+const REWARD_POSTERS = [
+  {
     src: "images/reward-taiwan-beach.webp",
     alt: "Retro travel poster of a beach day in Taiwan, with palms and bubble tea.",
   },
-  ja: [
-    {
-      src: "images/reward-japan-cherry.webp",
-      alt: "Retro travel poster of a Japan beach under cherry blossoms, with Mount Fuji.",
-    },
-    {
-      src: "images/reward-japan-surf.webp",
-      alt: "Retro travel poster of a surf beach in Japan, with Mount Fuji.",
-    },
-  ],
-};
+  {
+    src: "images/reward-japan-cherry.webp",
+    alt: "Retro travel poster of a Japan beach under cherry blossoms, with Mount Fuji.",
+  },
+  {
+    src: "images/reward-japan-surf.webp",
+    alt: "Retro travel poster of a surf beach in Japan, with Mount Fuji.",
+  },
+  {
+    src: "images/reward-lantern-beach.webp",
+    alt: "Retro travel poster of a sunset beach strung with paper lanterns.",
+  },
+  {
+    src: "images/reward-hot-spring.webp",
+    alt: "Retro travel poster of a mountain hot spring in autumn.",
+  },
+  {
+    src: "images/reward-sailboat.webp",
+    alt: "Retro travel poster of a sailboat in a green island bay.",
+  },
+];
+
+// Each course walks the same six posters from a different start, so both trips see every picture.
+const REWARD_OFFSET = { zh: 0, ja: 3 };
 
 function rewardFor(course, unitIndex) {
-  if (course.id === "zh") return REWARDS.zh;
-  const posters = REWARDS.ja;
-  return posters[Math.max(0, unitIndex) % posters.length];
+  const offset = REWARD_OFFSET[course.id] ?? 0;
+  const index = (Math.max(0, unitIndex) + offset) % REWARD_POSTERS.length;
+  return REWARD_POSTERS[index];
 }
 
 function backSvg() {
