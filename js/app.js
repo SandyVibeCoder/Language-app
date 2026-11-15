@@ -20,6 +20,9 @@ import {
   phraseById,
   recordMiss,
   speakText,
+  speechForTone,
+  toneContour,
+  tonesFromPinyin,
   unitCoreComplete,
   unitUnlocked,
   visibleStreak,
@@ -82,8 +85,33 @@ function findPhrase(course, phraseId) {
   return null;
 }
 
+let toneGen = 0;
+let toneNodes = [];
+let toneMasters = [];
+
+function stopTones() {
+  toneGen += 1;
+  for (const node of toneNodes) {
+    try {
+      node.stop();
+    } catch (err) {
+      /* Already finished. */
+    }
+  }
+  for (const master of toneMasters) {
+    try {
+      master.disconnect();
+    } catch (err) {
+      /* Already disconnected. */
+    }
+  }
+  toneNodes = [];
+  toneMasters = [];
+}
+
 function stopSpeech() {
   voiceToken += 1;
+  stopTones();
   try {
     window.speechSynthesis?.cancel();
   } catch (err) {
@@ -124,7 +152,7 @@ function accentNote(course) {
   return id.startsWith(course.voice.toLowerCase()) ? "" : course.accentNote;
 }
 
-function speak(text, lang, onstart) {
+function speak(text, lang, onstart, tune) {
   const synth = window.speechSynthesis;
   if (!synth || typeof SpeechSynthesisUtterance !== "function" || !text) {
     return Promise.resolve(false);
@@ -142,7 +170,9 @@ function speak(text, lang, onstart) {
     utterance.lang = lang;
     const voice = pickVoice(lang);
     if (voice) utterance.voice = voice;
-    utterance.rate = String(lang).toLowerCase().startsWith("zh") ? 0.82 : 0.9;
+    const zh = String(lang).toLowerCase().startsWith("zh");
+    utterance.rate = tune?.rate ?? (zh ? 0.82 : 0.9);
+    if (tune?.pitch) utterance.pitch = tune.pitch;
     utterance.onstart = () => {
       if (token !== voiceToken) return;
       started = true;
@@ -165,24 +195,103 @@ function speak(text, lang, onstart) {
   });
 }
 
-function playLine(text, lang) {
+function playToneContours(tones, onstart) {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx || !tones.length) return Promise.resolve(false);
+  if (!playToneContours.ctx) {
+    try {
+      playToneContours.ctx = new AudioCtx();
+    } catch (err) {
+      return Promise.resolve(false);
+    }
+  }
+  const ctx = playToneContours.ctx;
+  ctx.resume?.().catch(() => {});
+  const gen = toneGen;
+  const base = 210;
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.2, ctx.currentTime);
+  master.connect(ctx.destination);
+  toneMasters.push(master);
+  let when = ctx.currentTime + 0.03;
+  for (const tone of tones) {
+    const shape = toneContour(tone);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = "triangle";
+    filter.type = "lowpass";
+    filter.frequency.value = 1800;
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+    const dur = shape.ms / 1000;
+    const freqs = shape.pitches.map((mult) => base * mult);
+    osc.frequency.setValueAtTime(freqs[0], when);
+    for (let i = 1; i < freqs.length; i += 1) {
+      const at = when + (dur * i) / (freqs.length - 1);
+      if (freqs[i] === freqs[i - 1]) osc.frequency.setValueAtTime(freqs[i], at);
+      else osc.frequency.exponentialRampToValueAtTime(freqs[i], at);
+    }
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(1, when + Math.min(0.04, dur * 0.18));
+    gain.gain.setValueAtTime(1, when + dur * 0.8);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    osc.start(when);
+    osc.stop(when + dur + 0.02);
+    toneNodes.push(osc);
+    when += dur + 0.08;
+  }
+  onstart?.();
+  const wait = Math.max(0, (when - ctx.currentTime) * 1000 + 20);
+  return new Promise((resolve) => {
+    window.setTimeout(() => {
+      try {
+        master.disconnect();
+      } catch (err) {
+        /* Already disconnected. */
+      }
+      resolve(gen === toneGen);
+    }, wait);
+  });
+}
+
+function playLine(text, lang, toneRoman) {
   const token = ++voiceToken;
+  stopTones();
+  try {
+    window.speechSynthesis?.cancel();
+  } catch (err) {
+    /* A missing voice still leaves the written phrase. */
+  }
   if (session) {
     session.voice = "trying";
     session.hearFailed = false;
   }
   paintAudio();
-  const promise = speak(text, lang, () => {
+  const markPlaying = () => {
     if (token !== voiceToken || !session || session.phase !== "run") return;
     session.voice = "playing";
     paintAudio();
-  });
-  promise.then((ok) => {
-    if (token !== voiceToken || !session || session.phase !== "run") return;
-    session.voice = ok ? "done" : "failed";
-    session.hearFailed = !ok;
-    paintAudio();
-  });
+  };
+  const zhTones =
+    session?.unitId === "sounds" && String(lang || "").toLowerCase().startsWith("zh")
+      ? tonesFromPinyin(toneRoman || "")
+      : [];
+  const tune =
+    zhTones.length === 1 ? speechForTone(zhTones[0]) : zhTones.length > 1 ? { rate: 0.64, pitch: 1 } : null;
+  const contour = zhTones.length ? playToneContours(zhTones, markPlaying) : Promise.resolve(false);
+  contour
+    .then((toneOk) => {
+      if (token !== voiceToken) return false;
+      return speak(text, lang, markPlaying, tune).then((speechOk) => toneOk || speechOk);
+    })
+    .then((ok) => {
+      if (token !== voiceToken || !session || session.phase !== "run") return;
+      session.voice = ok ? "done" : "failed";
+      session.hearFailed = !ok;
+      paintAudio();
+    });
 }
 
 function keepScroll(change) {
@@ -448,7 +557,7 @@ function onClick(event) {
   if (action === "hear") {
     const course = currentCourse();
     const phrase = session.queue ? session.queue[0] : findPhrase(course, currentStep()?.phraseId);
-    if (phrase) playLine(speakText(phrase), course.voice);
+    if (phrase) playLine(speakText(phrase), course.voice, phrase.roman);
     return;
   }
   if (action === "again") {
@@ -495,17 +604,17 @@ function onClick(event) {
   if (action === "play") {
     const course = currentCourse();
     const step = currentStep();
-    if (step.speak?.script) playLine(step.speak.script, course.voice);
+    if (step.speak?.script) playLine(step.speak.script, course.voice, step.speak.roman || "");
     else {
       const phrase = findPhrase(course, step.phraseId);
-      if (phrase) playLine(speakText(phrase), course.voice);
+      if (phrase) playLine(speakText(phrase), course.voice, phrase.roman);
     }
     return;
   }
   if (action === "example") {
     const course = currentCourse();
     const example = currentStep()?.examples?.[Number(el.dataset.index)];
-    if (example) playLine(example.script, course.voice);
+    if (example) playLine(example.script, course.voice, example.roman);
   }
 }
 
@@ -806,6 +915,19 @@ function topbar(title) {
     </header>`;
 }
 
+function lessonBar(title) {
+  return `
+    <header class="topbar lesson-bar">
+      <button type="button" class="icon-btn" data-action="back" aria-label="Close lesson">
+        ${closeSvg()}
+      </button>
+      <h1>${esc(title)}</h1>
+      <button type="button" class="icon-btn" data-action="back" aria-label="Back">
+        ${backSvg()}
+      </button>
+    </header>`;
+}
+
 function renderLesson(course) {
   if (!session) return renderHome();
   if (session.phase === "done") return renderDone(course);
@@ -828,7 +950,7 @@ function renderCards(course) {
        </div>`
     : `<button type="button" class="primary" data-action="flip" data-flip-slot>Show the phrase</button>`;
   return `
-    ${topbar(session.built.title)}
+    ${lessonBar(session.built.title)}
     ${lessonProgress(session.finished, total)}
     <main class="main lesson cards">
       <p class="count">${session.finished + 1} of ${total}</p>
@@ -869,7 +991,7 @@ function renderSteps(course) {
        <button type="button" class="primary" data-action="next">${session.index === total - 1 ? "Finish" : "Continue"}</button>`
     : "";
   return `
-    ${topbar(session.built.title)}
+    ${lessonBar(session.built.title)}
     ${lessonProgress(session.index, total)}
     <main class="main lesson">
       <p class="count">${session.index + 1} of ${total}</p>
@@ -919,6 +1041,7 @@ function renderChoice(course, step, note) {
   return `
     <p class="prompt-label">${esc(step.promptLabel || "")}</p>
     <p class="prompt">${esc(step.prompt)}</p>
+    ${step.speak ? `<button type="button" class="secondary slim" data-action="play">${esc(step.speak.label || "Hear it")}</button>` : ""}
     ${note && session.unitId === "sounds" ? `<p class="hint">${esc(note)}</p>` : ""}
     <div class="options" ${session.picked ? 'aria-live="polite"' : ""}>${options}</div>
     ${reveal}`;
@@ -1012,7 +1135,7 @@ function renderDone(course) {
     ? `<figure class="reward"><img src="${esc(reward.src)}" alt="${esc(reward.alt)}" width="720" height="960"></figure>`
     : "";
   return `
-    ${topbar("Done")}
+    ${lessonBar("Done")}
     ${burst}
     <main class="main lesson done">
       ${poster}
@@ -1137,6 +1260,9 @@ function rewardFor(course, unitIndex) {
 
 function backSvg() {
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 L8 12 l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+function closeSvg() {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7 l10 10 M17 7 L7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
 }
 function checkSvg(large = false) {
   return `<svg class="check ${large ? "lg" : ""}" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="26" fill="none" stroke="currentColor" stroke-width="4"/><path d="M20 33.5 l8 8 16-18" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
