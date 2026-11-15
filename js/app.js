@@ -829,9 +829,11 @@ function renderDone(course) {
     lines.push(`${result.streakNote} ${result.streakNote === 1 ? "day" : "days"} in a row`);
   }
   if (result.goalJustMet) lines.push("Daily goal done.");
-  if (unit && result.first && unitCoreComplete(state, course.id, unit.id) && CORE_LESSONS.includes(lessonId)) {
-    const index = course.units.findIndex((item) => item.id === unit.id);
-    lines.push(index < course.units.length - 1 ? "This unit is done. The next one is open." : "That's the last unit in this course.");
+  const unitIndex = unit ? course.units.findIndex((item) => item.id === unit.id) : -1;
+  const unitJustDone =
+    unit && result.first && unitCoreComplete(state, course.id, unit.id) && CORE_LESSONS.includes(lessonId);
+  if (unitJustDone) {
+    lines.push(unitIndex < course.units.length - 1 ? "This unit is done. The next one is open." : "That's the last unit in this course.");
   }
   if (session.wrongs > 0 && lessonId !== "review" && lessonId !== "intro") {
     lines.push("Review can pick up the ones that slipped.");
@@ -855,10 +857,15 @@ function renderDone(course) {
   const burst = motionOk()
     ? `<canvas class="confetti" data-kind="${result.goalJustMet ? "goal" : "lesson"}" aria-hidden="true"></canvas>`
     : "";
+  const reward = unitJustDone ? rewardFor(course, unitIndex) : null;
+  const poster = reward
+    ? `<figure class="reward"><img src="${esc(reward.src)}" alt="${esc(reward.alt)}" width="720" height="960"></figure>`
+    : "";
   return `
     ${topbar("Done", "exit", true)}
     ${burst}
     <main class="main lesson done">
+      ${poster}
       <div class="celebrate">${checkSvg(true)}<h2>${esc(lines[0])}</h2></div>
       <ul class="done-lines">${lines
         .slice(1)
@@ -869,6 +876,29 @@ function renderDone(course) {
       <button type="button" class="primary" data-action="done-next">${esc(primary)}</button>
       ${stop}
     </footer>`;
+}
+
+const REWARDS = {
+  zh: {
+    src: "images/reward-taiwan-beach.webp",
+    alt: "Retro travel poster of a beach day in Taiwan, with palms and bubble tea.",
+  },
+  ja: [
+    {
+      src: "images/reward-japan-cherry.webp",
+      alt: "Retro travel poster of a Japan beach under cherry blossoms, with Mount Fuji.",
+    },
+    {
+      src: "images/reward-japan-surf.webp",
+      alt: "Retro travel poster of a surf beach in Japan, with Mount Fuji.",
+    },
+  ],
+};
+
+function rewardFor(course, unitIndex) {
+  if (course.id === "zh") return REWARDS.zh;
+  const posters = REWARDS.ja;
+  return posters[Math.max(0, unitIndex) % posters.length];
 }
 
 function backSvg() {
