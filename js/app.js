@@ -298,8 +298,7 @@ function onClick(event) {
   }
 
   if (action === "flip") {
-    session.flipped = true;
-    render();
+    revealCard();
     return;
   }
   if (action === "hear") {
@@ -393,6 +392,96 @@ function afterLesson(goOn) {
   goUnit(courseId, unitId);
 }
 
+function revealCard() {
+  if (!session || session.flipped) return;
+  session.flipped = true;
+  const card = root().querySelector(".flip-card");
+  const slot = root().querySelector("[data-flip-slot]");
+  if (!card || !slot) {
+    render();
+    return;
+  }
+  card.classList.add("is-flipped");
+  card.setAttribute("aria-pressed", "true");
+  slot.outerHTML = `<div class="pair" data-flip-slot>
+      <button type="button" class="secondary" data-action="again">Again</button>
+      <button type="button" class="primary" data-action="got">Got it</button>
+    </div>`;
+}
+
+function motionOk() {
+  return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function startConfetti(canvas, kind) {
+  if (!motionOk()) {
+    canvas.remove();
+    return;
+  }
+  const host = canvas.parentElement;
+  const width = host.clientWidth;
+  const height = host.clientHeight;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.max(1, Math.floor(width * dpr));
+  canvas.height = Math.max(1, Math.floor(height * dpr));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.scale(dpr, dpr);
+  const big = kind === "goal";
+  const colors = ["#9d3414", "#d4653a", "#1c3f68", "#d7a441", "#1f7a4d"];
+  const makePiece = (wide) => {
+    const spread = (Math.random() - 0.5) * (wide ? 2.3 : 1.35);
+    const speed = (wide ? 460 : 300) * (0.62 + Math.random() * 0.55);
+    return {
+      x: width / 2 + (Math.random() - 0.5) * (wide ? 90 : 40),
+      y: height * 0.4,
+      vx: Math.sin(spread) * speed,
+      vy: -Math.cos(spread) * speed * 0.92,
+      w: 5 + Math.random() * (wide ? 7 : 4),
+      h: 3 + Math.random() * 5,
+      rot: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 7,
+      color: colors[Math.floor(Math.random() * colors.length)],
+    };
+  };
+  const pieces = Array.from({ length: big ? 84 : 38 }, () => makePiece(big));
+  canvas.dataset.pieces = String(pieces.length);
+  const duration = big ? 2300 : 1500;
+  let last = performance.now();
+  let extra = false;
+  const started = last;
+  const tick = (now) => {
+    if (!canvas.isConnected) return;
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    const elapsed = now - started;
+    if (big && !extra && elapsed > 280) {
+      extra = true;
+      for (let i = 0; i < 42; i += 1) pieces.push(makePiece(true));
+      canvas.dataset.pieces = String(pieces.length);
+    }
+    ctx.clearRect(0, 0, width, height);
+    const fade = elapsed < duration * 0.65 ? 1 : Math.max(0, 1 - (elapsed - duration * 0.65) / (duration * 0.35));
+    ctx.globalAlpha = fade;
+    for (const piece of pieces) {
+      piece.vy += 1280 * dt;
+      piece.x += piece.vx * dt;
+      piece.y += piece.vy * dt;
+      piece.vx *= 0.992;
+      piece.rot += piece.vr * dt;
+      ctx.save();
+      ctx.translate(piece.x, piece.y);
+      ctx.rotate(piece.rot);
+      ctx.fillStyle = piece.color;
+      ctx.fillRect(-piece.w / 2, -piece.h / 2, piece.w, piece.h);
+      ctx.restore();
+    }
+    if (elapsed < duration) requestAnimationFrame(tick);
+    else canvas.remove();
+  };
+  requestAnimationFrame(tick);
+}
+
 function render() {
   const app = root();
   const course = currentCourse();
@@ -403,6 +492,11 @@ function render() {
   else if (view.name === "unit") html = renderUnit(course, currentUnit());
   else html = renderLesson(course);
   app.innerHTML = html;
+  const burst = app.querySelector(".confetti");
+  if (burst && session && !session.confettiPlayed) {
+    session.confettiPlayed = true;
+    startConfetti(burst, burst.dataset.kind);
+  }
   const title =
     view.name === "home"
       ? "Travel Speak"
@@ -577,28 +671,35 @@ function lessonProgress(doneCount, total) {
 function renderCards(course) {
   const phrase = session.queue[0];
   const total = session.finished + session.queue.length;
-  const face = session.flipped
-    ? `<p class="roman">${esc(phrase.roman)}</p>
-       <p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>
-       ${phrase.hint ? `<p class="hint">${esc(phrase.hint)}</p>` : ""}`
-    : `<p class="english">${esc(phrase.en)}</p><p class="hint">Tap the card when you want the phrase.</p>`;
-  const dock = session.flipped
-    ? `<div class="pair">
+  const actions = session.flipped
+    ? `<div class="pair" data-flip-slot>
          <button type="button" class="secondary" data-action="again">Again</button>
          <button type="button" class="primary" data-action="got">Got it</button>
        </div>`
-    : `<button type="button" class="primary" data-action="flip">Show the phrase</button>`;
+    : `<button type="button" class="primary" data-action="flip" data-flip-slot>Show the phrase</button>`;
   return `
     ${topbar(session.built.title, "exit", true)}
     ${lessonProgress(session.finished, total)}
-    <main class="main lesson">
+    <main class="main lesson cards">
       <p class="count">${session.finished + 1} of ${total}</p>
-      <div class="card" data-action="flip" tabindex="0">${face}</div>
+      <div class="flip-scene">
+        <div class="flip-card${session.flipped ? " is-flipped" : ""}" data-action="flip" tabindex="0" role="button" aria-pressed="${session.flipped ? "true" : "false"}" aria-label="${esc(session.flipped ? phrase.roman : phrase.en)}">
+          <div class="flip-face flip-front">
+            <p class="english">${esc(phrase.en)}</p>
+            <p class="hint">Tap the card when you want the phrase.</p>
+          </div>
+          <div class="flip-face flip-back">
+            <p class="roman">${esc(phrase.roman)}</p>
+            <p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>
+            ${phrase.hint ? `<p class="hint">${esc(phrase.hint)}</p>` : ""}
+          </div>
+        </div>
+      </div>
       ${session.hearFailed ? '<p class="hint">No voice on this phone. You can still read the phrase.</p>' : ""}
     </main>
     <footer class="dock">
       <button type="button" class="secondary" data-action="hear">Hear it</button>
-      ${dock}
+      ${actions}
     </footer>`;
 }
 
@@ -728,9 +829,11 @@ function renderDone(course) {
     lines.push(`${result.streakNote} ${result.streakNote === 1 ? "day" : "days"} in a row`);
   }
   if (result.goalJustMet) lines.push("Daily goal done.");
-  if (unit && result.first && unitCoreComplete(state, course.id, unit.id) && CORE_LESSONS.includes(lessonId)) {
-    const index = course.units.findIndex((item) => item.id === unit.id);
-    lines.push(index < course.units.length - 1 ? "This unit is done. The next one is open." : "That's the last unit in this course.");
+  const unitIndex = unit ? course.units.findIndex((item) => item.id === unit.id) : -1;
+  const unitJustDone =
+    unit && result.first && unitCoreComplete(state, course.id, unit.id) && CORE_LESSONS.includes(lessonId);
+  if (unitJustDone) {
+    lines.push(unitIndex < course.units.length - 1 ? "This unit is done. The next one is open." : "That's the last unit in this course.");
   }
   if (session.wrongs > 0 && lessonId !== "review" && lessonId !== "intro") {
     lines.push("Review can pick up the ones that slipped.");
@@ -751,9 +854,18 @@ function renderDone(course) {
     }
   }
   const stop = goesOn ? `<button type="button" class="text" data-action="done-stop">Stop here</button>` : "";
+  const burst = motionOk()
+    ? `<canvas class="confetti" data-kind="${result.goalJustMet ? "goal" : "lesson"}" aria-hidden="true"></canvas>`
+    : "";
+  const reward = unitJustDone ? rewardFor(course, unitIndex) : null;
+  const poster = reward
+    ? `<figure class="reward"><img src="${esc(reward.src)}" alt="${esc(reward.alt)}" width="720" height="960"></figure>`
+    : "";
   return `
     ${topbar("Done", "exit", true)}
+    ${burst}
     <main class="main lesson done">
+      ${poster}
       <div class="celebrate">${checkSvg(true)}<h2>${esc(lines[0])}</h2></div>
       <ul class="done-lines">${lines
         .slice(1)
@@ -764,6 +876,29 @@ function renderDone(course) {
       <button type="button" class="primary" data-action="done-next">${esc(primary)}</button>
       ${stop}
     </footer>`;
+}
+
+const REWARDS = {
+  zh: {
+    src: "images/reward-taiwan-beach.webp",
+    alt: "Retro travel poster of a beach day in Taiwan, with palms and bubble tea.",
+  },
+  ja: [
+    {
+      src: "images/reward-japan-cherry.webp",
+      alt: "Retro travel poster of a Japan beach under cherry blossoms, with Mount Fuji.",
+    },
+    {
+      src: "images/reward-japan-surf.webp",
+      alt: "Retro travel poster of a surf beach in Japan, with Mount Fuji.",
+    },
+  ],
+};
+
+function rewardFor(course, unitIndex) {
+  if (course.id === "zh") return REWARDS.zh;
+  const posters = REWARDS.ja;
+  return posters[Math.max(0, unitIndex) % posters.length];
 }
 
 function backSvg() {

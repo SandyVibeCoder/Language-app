@@ -1,4 +1,5 @@
 // Checks phrase data and the progress rules. No browser, no network.
+import { readFileSync, statSync } from "node:fs";
 import { COURSES } from "../js/courses.js";
 import {
   CORE_LESSONS,
@@ -188,6 +189,18 @@ assert(yesterdayOf("2026-03-01") === "2026-02-28", "month boundary");
 assert(yesterdayOf("2024-03-01") === "2024-02-29", "leap day");
 assert(DAILY_GOAL === 20, "goal");
 assert(dayKey(new Date(2026, 0, 2)) === "2026-01-02", "day key");
+
+const rewardFiles = [
+  "images/reward-taiwan-beach.webp",
+  "images/reward-japan-cherry.webp",
+  "images/reward-japan-surf.webp",
+];
+const sw = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
+for (const file of rewardFiles) {
+  const bytes = statSync(new URL("../" + file, import.meta.url)).size;
+  assert(bytes > 1000 && bytes < 200 * 1024, `${file} is ${bytes} bytes`);
+  assert(sw.includes(file), `${file} missing from the service worker`);
+}
 
 const total = COURSES.reduce((n, c) => n + c.units.reduce((m, u) => m + u.phrases.length, 0), 0);
 console.log(`phrases: ${total}`);
