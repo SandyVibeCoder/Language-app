@@ -1,0 +1,6 @@
+{
+  "name": "travel-speak",
+  "private": true,
+  "type": "module",
+  "description": "Travel Speak, a static phrasebook for Taiwan and Japan."
+}

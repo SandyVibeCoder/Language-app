@@ -1,0 +1,69 @@
+name: Publish to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check phrases and progress rules
+        run: node scripts/check.mjs
+
+      - name: Prepare the site
+        run: |
+          mkdir -p _site
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '_site' \
+            --exclude 'README.md' \
+            --exclude 'package.json' \
+            --exclude 'scripts' \
+            ./ _site/
+          test -f _site/index.html
+          test -f _site/sw.js
+          test -f _site/manifest.webmanifest
+          test -f _site/js/courses.js
+          test -f _site/icons/apple-touch-icon.png
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        with:
+          # Asks GitHub to turn Pages on. The default workflow token often
+          # cannot do that; the next step explains the one setting if so.
+          enablement: true
+        continue-on-error: true
+
+      - name: Pages still needs one setting
+        if: steps.pages.outcome == 'failure'
+        run: |
+          echo "::error::Pages setup failed. If this is the first deploy, open Settings → Pages → Build and deployment → Source and choose GitHub Actions, then re-run this workflow. The Actions token cannot flip that switch by itself."
+          exit 1
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
