@@ -30,6 +30,7 @@ const STORAGE_KEY = "travel-speak-v1";
 let state = blankState();
 let saveOk = true;
 let view = { name: "home" };
+let resetScroll = false;
 let session = null;
 let voiceToken = 0;
 
@@ -170,17 +171,60 @@ function playLine(text, lang) {
     session.voice = "trying";
     session.hearFailed = false;
   }
-  if (session?.phase === "run") render();
+  paintAudio();
   const promise = speak(text, lang, () => {
     if (token !== voiceToken || !session || session.phase !== "run") return;
     session.voice = "playing";
-    render();
+    paintAudio();
   });
   promise.then((ok) => {
     if (token !== voiceToken || !session || session.phase !== "run") return;
     session.voice = ok ? "done" : "failed";
     session.hearFailed = !ok;
-    render();
+    paintAudio();
+  });
+}
+
+function keepScroll(change) {
+  const main = root().querySelector(".main");
+  const top = main ? main.scrollTop : 0;
+  const win = window.scrollY;
+  change();
+  if (main) main.scrollTop = top;
+  if (window.scrollY !== win) window.scrollTo(0, win);
+}
+
+function paintAudio() {
+  keepScroll(() => {
+    const play = root().querySelector("[data-action='play']");
+    if (play && session) {
+      const failed = session.voice === "failed";
+      const playing = session.voice === "playing" || session.voice === "trying";
+      const label = failed ? "Try again" : playing ? "Playing…" : "Play";
+      if (play.textContent !== label) play.textContent = label;
+    }
+    const course = currentCourse();
+    const step = currentStep();
+    if (session?.voice === "failed" && step?.type === "listen" && course && !root().querySelector(".fallback")) {
+      const phrase = findPhrase(course, step.phraseId);
+      const anchor = root().querySelector("[data-action='play']");
+      if (phrase && anchor) {
+        anchor.insertAdjacentHTML(
+          "afterend",
+          `<div class="fallback">
+            <p class="roman">${esc(phrase.roman)}</p>
+            <p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>
+            <p class="hint">No voice on this phone. Use the ${esc(course.romanName.toLowerCase())} and pick the meaning.</p>
+          </div>`,
+        );
+      }
+    }
+    if (session?.hearFailed && session.queue && !root().querySelector("[data-hear-note]")) {
+      root().querySelector(".flip-scene")?.insertAdjacentHTML(
+        "afterend",
+        '<p class="hint" data-hear-note>No voice on this phone. You can still read the phrase.</p>',
+      );
+    }
   });
 }
 
@@ -194,10 +238,44 @@ function currentUnit() {
   return unitById(course, view.unitId);
 }
 
+function screenSnapshot() {
+  return {
+    name: view.name,
+    courseId: view.courseId || null,
+    unitId: view.unitId || null,
+    lessonId: view.lessonId || null,
+    phase: session?.phase || null,
+    result: session?.phase === "done" ? session.result : null,
+    wrongs: session?.wrongs || 0,
+    title: session?.built?.title || null,
+  };
+}
+
+function screenUrl(saved) {
+  const path = window.location.pathname;
+  if (!saved || saved.name === "home") return path;
+  const params = new URLSearchParams();
+  params.set("screen", saved.name);
+  if (saved.courseId) params.set("course", saved.courseId);
+  if (saved.unitId) params.set("unit", saved.unitId);
+  if (saved.lessonId) params.set("lesson", saved.lessonId);
+  if (saved.phase === "done") params.set("phase", "done");
+  return `${path}?${params.toString()}`;
+}
+
+function writeHistory(mode) {
+  const saved = screenSnapshot();
+  const data = { app: true, view: saved };
+  if (mode === "replace") history.replaceState(data, "", screenUrl(saved));
+  else history.pushState(data, "", screenUrl(saved));
+}
+
 function goHome() {
   stopSpeech();
   session = null;
   view = { name: "home" };
+  writeHistory("push");
+  resetScroll = true;
   render();
 }
 
@@ -205,6 +283,8 @@ function goCourse(courseId) {
   stopSpeech();
   session = null;
   view = { name: "course", courseId };
+  writeHistory("push");
+  resetScroll = true;
   render();
 }
 
@@ -212,10 +292,12 @@ function goUnit(courseId, unitId) {
   stopSpeech();
   session = null;
   view = { name: "unit", courseId, unitId };
+  writeHistory("push");
+  resetScroll = true;
   render();
 }
 
-function startLesson(courseId, unitId, lessonId) {
+function beginLesson(courseId, unitId, lessonId) {
   stopSpeech();
   const course = courseById(courseId);
   const built =
@@ -238,17 +320,72 @@ function startLesson(courseId, unitId, lessonId) {
     result: null,
   };
   view = { name: "lesson", courseId, unitId, lessonId };
+  resetScroll = true;
   render();
 }
 
-function exitLesson() {
-  const courseId = session?.courseId;
-  const unitId = session?.unitId;
+function startLesson(courseId, unitId, lessonId) {
+  beginLesson(courseId, unitId, lessonId);
+  writeHistory("push");
+}
+
+function restoreDone(saved) {
+  session = {
+    courseId: saved.courseId,
+    unitId: saved.unitId,
+    lessonId: saved.lessonId,
+    built: { title: saved.title || "Done" },
+    queue: null,
+    flipped: false,
+    finished: 0,
+    index: 0,
+    picked: null,
+    voice: "idle",
+    wrongs: saved.wrongs || 0,
+    phase: "done",
+    result: saved.result,
+    confettiPlayed: true,
+  };
+  view = {
+    name: "lesson",
+    courseId: saved.courseId,
+    unitId: saved.unitId,
+    lessonId: saved.lessonId,
+  };
+  resetScroll = true;
+  render();
+}
+
+function showHistory(saved) {
   stopSpeech();
+  if (!saved || saved.name === "home") {
+    session = null;
+    view = { name: "home" };
+    resetScroll = true;
+    render();
+    return;
+  }
+  if (saved.name === "lesson" && saved.phase === "done" && saved.result) {
+    restoreDone(saved);
+    return;
+  }
+  if (saved.name === "lesson") {
+    beginLesson(saved.courseId, saved.unitId, saved.lessonId);
+    return;
+  }
   session = null;
-  if (!courseId) goHome();
-  else if (!unitId || unitId === "sounds") goCourse(courseId);
-  else goUnit(courseId, unitId);
+  view = {
+    name: saved.name,
+    courseId: saved.courseId,
+    unitId: saved.unitId,
+    lessonId: saved.lessonId,
+  };
+  resetScroll = true;
+  render();
+}
+
+function goBack() {
+  if (history.state?.app) history.back();
 }
 
 function finishLesson() {
@@ -267,6 +404,8 @@ function finishLesson() {
   save(result.state);
   session.phase = "done";
   session.result = result;
+  writeHistory("replace");
+  resetScroll = true;
   render();
 }
 
@@ -279,13 +418,15 @@ function onClick(event) {
   if (!el || !root().contains(el)) return;
   const action = el.dataset.action;
 
-  if (action === "home") return goHome();
+  if (action === "back") {
+    event.preventDefault();
+    goBack();
+    return;
+  }
   if (action === "course") return goCourse(el.dataset.course);
   if (action === "unit") return goUnit(view.courseId, el.dataset.unit);
-  if (action === "back-course") return goCourse(view.courseId);
   if (action === "start") return startLesson(view.courseId, view.unitId || el.dataset.unit, el.dataset.lesson);
   if (action === "start-sounds") return startLesson(el.dataset.course || view.courseId, "sounds", "intro");
-  if (action === "exit") return exitLesson();
   if (action === "dismiss-install") {
     save(dismissInstallHint(state));
     render();
@@ -300,6 +441,9 @@ function onClick(event) {
   if (action === "flip") {
     revealCard();
     return;
+  }
+  if (action === "hear" || action === "play" || action === "example") {
+    event.preventDefault();
   }
   if (action === "hear") {
     const course = currentCourse();
@@ -370,11 +514,9 @@ function afterLesson(goOn) {
   const unitId = session.unitId;
   const lessonId = session.lessonId;
   const wrongs = session.wrongs;
-  session = null;
   stopSpeech();
   if (!goOn || unitId === "sounds") {
-    if (unitId === "sounds") goCourse(courseId);
-    else goUnit(courseId, unitId);
+    goBack();
     return;
   }
   const course = courseById(courseId);
@@ -389,7 +531,7 @@ function afterLesson(goOn) {
     startLesson(courseId, unitId, "review");
     return;
   }
-  goUnit(courseId, unitId);
+  goBack();
 }
 
 function revealCard() {
@@ -483,6 +625,11 @@ function startConfetti(canvas, kind) {
 }
 
 function render() {
+  const previous = root().querySelector(".main");
+  const keepMain = resetScroll ? 0 : previous?.scrollTop || 0;
+  const keepWin = resetScroll ? 0 : window.scrollY;
+  const shouldReset = resetScroll;
+  resetScroll = false;
   const app = root();
   const course = currentCourse();
   app.className = `${course ? `tone-${course.id}` : "tone-home"}${view.name === "lesson" ? " screen" : ""}`;
@@ -504,6 +651,10 @@ function render() {
         ? session?.built?.title || "Lesson"
         : course?.name || "Travel Speak";
   document.title = title === "Travel Speak" ? title : `${title} · Travel Speak`;
+  const next = app.querySelector(".main");
+  if (next) next.scrollTop = keepMain;
+  if (shouldReset) window.scrollTo(0, 0);
+  else if (window.scrollY !== keepWin) window.scrollTo(0, keepWin);
 }
 
 function banner() {
@@ -599,7 +750,7 @@ function renderCourse(course) {
     })
     .join("");
   return `
-    ${topbar(course.name, "home", false)}
+    ${topbar(course.name)}
     <main class="main">
       ${banner()}
       <p class="lede tight">${esc(course.blurb)}</p>
@@ -636,7 +787,7 @@ function renderUnit(course, unit) {
       </button>`;
   }).join("");
   return `
-    ${topbar(unit.title, "back-course", false)}
+    ${topbar(unit.title)}
     <main class="main">
       ${banner()}
       <p class="lede tight">${esc(unit.blurb)}</p>
@@ -645,12 +796,11 @@ function renderUnit(course, unit) {
     </main>`;
 }
 
-function topbar(title, backAction, isClose) {
-  const label = isClose ? "Close lesson" : "Back";
+function topbar(title) {
   return `
     <header class="topbar">
-      <button type="button" class="icon-btn" data-action="${backAction}" aria-label="${label}">
-        ${isClose ? closeSvg() : backSvg()}
+      <button type="button" class="back-btn" data-action="back" aria-label="Back">
+        ${backSvg()}<span>Back</span>
       </button>
       <h1>${esc(title)}</h1>
     </header>`;
@@ -678,7 +828,7 @@ function renderCards(course) {
        </div>`
     : `<button type="button" class="primary" data-action="flip" data-flip-slot>Show the phrase</button>`;
   return `
-    ${topbar(session.built.title, "exit", true)}
+    ${topbar(session.built.title)}
     ${lessonProgress(session.finished, total)}
     <main class="main lesson cards">
       <p class="count">${session.finished + 1} of ${total}</p>
@@ -719,7 +869,7 @@ function renderSteps(course) {
        <button type="button" class="primary" data-action="next">${session.index === total - 1 ? "Finish" : "Continue"}</button>`
     : "";
   return `
-    ${topbar(session.built.title, "exit", true)}
+    ${topbar(session.built.title)}
     ${lessonProgress(session.index, total)}
     <main class="main lesson">
       <p class="count">${session.index + 1} of ${total}</p>
@@ -862,7 +1012,7 @@ function renderDone(course) {
     ? `<figure class="reward"><img src="${esc(reward.src)}" alt="${esc(reward.alt)}" width="720" height="960"></figure>`
     : "";
   return `
-    ${topbar("Done", "exit", true)}
+    ${topbar("Done")}
     ${burst}
     <main class="main lesson done">
       ${poster}
@@ -988,9 +1138,6 @@ function rewardFor(course, unitIndex) {
 function backSvg() {
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 L8 12 l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 }
-function closeSvg() {
-  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7 l10 10 M17 7 L7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
-}
 function checkSvg(large = false) {
   return `<svg class="check ${large ? "lg" : ""}" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="26" fill="none" stroke="currentColor" stroke-width="4"/><path d="M20 33.5 l8 8 16-18" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
@@ -1012,13 +1159,13 @@ function boot() {
   });
   window.addEventListener("online", render);
   window.addEventListener("offline", render);
-  let voicesNoted = false;
-  window.speechSynthesis?.addEventListener?.("voiceschanged", () => {
-    if (voicesNoted) return;
-    voicesNoted = true;
-    if (view.name === "lesson") render();
+  window.addEventListener("popstate", (event) => {
+    showHistory(event.state?.view || { name: "home" });
   });
-  render();
+  if (!history.state?.app) {
+    history.replaceState({ app: true, view: { name: "home" } }, "", screenUrl({ name: "home" }));
+  }
+  showHistory(history.state?.view || { name: "home" });
   if ("serviceWorker" in navigator) {
     const swUrl = new URL("sw.js", window.location.href);
     navigator.serviceWorker.register(swUrl.href).catch(() => {});
