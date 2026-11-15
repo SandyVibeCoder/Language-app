@@ -190,43 +190,36 @@ assert(yesterdayOf("2024-03-01") === "2024-02-29", "leap day");
 assert(DAILY_GOAL === 20, "goal");
 assert(dayKey(new Date(2026, 0, 2)) === "2026-01-02", "day key");
 
-const rewardFiles = [
+const zhRewards = [
   "images/reward-taiwan-beach.webp",
+  "images/reward-lantern-beach.webp",
+  "images/reward-sailboat.webp",
+  ...Array.from({ length: 9 }, (_, i) => `images/reward-tw-${String(i + 1).padStart(2, "0")}.webp`),
+];
+const jaRewards = [
   "images/reward-japan-cherry.webp",
   "images/reward-japan-surf.webp",
-  "images/reward-lantern-beach.webp",
   "images/reward-hot-spring.webp",
-  "images/reward-sailboat.webp",
+  ...Array.from({ length: 9 }, (_, i) => `images/reward-jp-${String(i + 1).padStart(2, "0")}.webp`),
 ];
+const rewardFiles = [...zhRewards, ...jaRewards];
 const sw = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
 for (const file of rewardFiles) {
   const bytes = statSync(new URL("../" + file, import.meta.url)).size;
-  assert(bytes > 1000 && bytes < 200 * 1024, `${file} is ${bytes} bytes`);
-  assert(sw.includes(file), `${file} missing from the service worker`);
+  assert(bytes > 1000 && bytes < 150 * 1024, `${file} is ${bytes} bytes`);
+  assert(sw.includes(`./${file}`), `${file} missing from the service worker`);
 }
+assert(new Set(zhRewards).size === 12, "Mandarin has 12 posters");
+assert(new Set(jaRewards).size === 12, "Japanese has 12 posters");
+assert(zhRewards.every((file) => !jaRewards.includes(file)), "the two courses do not share a poster");
 
 const appSource = readFileSync(new URL("../js/app.js", import.meta.url), "utf8");
-const posterSrcs = [...appSource.matchAll(/src: "(images\/reward-[^"]+)"/g)].map((match) => match[1]);
-assert(posterSrcs.length === rewardFiles.length, "rotation lists every poster once");
-assert(new Set(posterSrcs).size === posterSrcs.length, "rotation posters are unique");
-const offsetMatch = appSource.match(/REWARD_OFFSET = \{ zh: (\d+), ja: (\d+) \}/);
-assert(offsetMatch, "each course has a start in the poster list");
-const zhOffset = Number(offsetMatch[1]);
-const jaOffset = Number(offsetMatch[2]);
-const seenBy = (offset) => {
-  const seen = new Set();
-  for (let unit = 0; unit < 8; unit += 1) seen.add(posterSrcs[(unit + offset) % posterSrcs.length]);
-  return seen;
-};
-assert(seenBy(zhOffset).size === posterSrcs.length, "Mandarin uses every poster");
-assert(seenBy(jaOffset).size === posterSrcs.length, "Japanese uses every poster");
-let sharedSlots = 0;
-for (let unit = 0; unit < 8; unit += 1) {
-  if (posterSrcs[(unit + zhOffset) % posterSrcs.length] === posterSrcs[(unit + jaOffset) % posterSrcs.length]) {
-    sharedSlots += 1;
-  }
-}
-assert(sharedSlots < 8, "the two courses do not show the same poster on every unit");
+const zhBlock = appSource.split("const ZH_REWARDS")[1]?.split("const JA_REWARDS")[0] || "";
+const jaBlock = appSource.split("const JA_REWARDS")[1]?.split("function rewardFor")[0] || "";
+const listed = (block) => [...block.matchAll(/src: "(images\/reward-[^"]+)"/g)].map((match) => match[1]);
+assert(listed(zhBlock).join() === zhRewards.join(), "Mandarin rotation order");
+assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
+assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
 
 const total = COURSES.reduce((n, c) => n + c.units.reduce((m, u) => m + u.phrases.length, 0), 0);
 console.log(`phrases: ${total}`);
