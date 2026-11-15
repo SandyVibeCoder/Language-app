@@ -340,3 +340,66 @@ export function nextLessonId(state, courseId, unit) {
   }
   return null;
 }
+
+const TONE_MARKS = {
+  ā: 1, ē: 1, ī: 1, ō: 1, ū: 1, ǖ: 1,
+  á: 2, é: 2, í: 2, ó: 2, ú: 2, ǘ: 2,
+  ǎ: 3, ě: 3, ǐ: 3, ǒ: 3, ǔ: 3, ǚ: 3,
+  à: 4, è: 4, ì: 4, ò: 4, ù: 4, ǜ: 4,
+};
+
+// Multipliers of a mid pitch. A plain teaching contour was about
+// tone 2: 0.92→1.28, tone 3 dip of 0.22, tone 4: 1.28→0.86.
+// These spans are at least 1.5× that, and each shape is the one the
+// tone lesson describes.
+const TONE_SHAPES = {
+  1: { ms: 760, pitches: [1.45, 1.45] },
+  2: { ms: 640, pitches: [0.76, 1.72] },
+  3: { ms: 820, pitches: [1.05, 0.52, 1.34] },
+  4: { ms: 320, pitches: [1.75, 0.58] },
+  0: { ms: 220, pitches: [1, 0.9] },
+};
+
+const TONE_SPEECH = {
+  1: { rate: 0.58, pitch: 1.42 },
+  2: { rate: 0.66, pitch: 1.05 },
+  3: { rate: 0.62, pitch: 0.7 },
+  4: { rate: 0.74, pitch: 1.3 },
+  0: { rate: 0.86, pitch: 1 },
+};
+
+export function tonesFromPinyin(text) {
+  const syllables = String(text || "")
+    .split(/[^A-Za-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜüÜ]+/)
+    .filter(Boolean);
+  const tones = [];
+  for (const syllable of syllables) {
+    let marked = 0;
+    let vowel = false;
+    for (const ch of syllable) {
+      const tone = TONE_MARKS[ch];
+      if (tone) {
+        marked = tone;
+        vowel = true;
+        break;
+      }
+      if ("aeiouü".includes(ch.toLowerCase())) vowel = true;
+    }
+    if (!vowel) continue;
+    if (marked) {
+      tones.push(marked);
+      continue;
+    }
+    if (syllable !== syllable.toLowerCase() || syllable.length > 6) continue;
+    tones.push(0);
+  }
+  return tones;
+}
+
+export function toneContour(tone) {
+  return TONE_SHAPES[tone] ?? TONE_SHAPES[0];
+}
+
+export function speechForTone(tone) {
+  return TONE_SPEECH[tone] ?? TONE_SPEECH[0];
+}

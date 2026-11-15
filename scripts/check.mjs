@@ -14,6 +14,9 @@ import {
   makeRng,
   missCountForUnit,
   recordMiss,
+  speechForTone,
+  toneContour,
+  tonesFromPinyin,
   unitCoreComplete,
   unitUnlocked,
   visibleStreak,
@@ -220,6 +223,41 @@ const listed = (block) => [...block.matchAll(/src: "(images\/reward-[^"]+)"/g)].
 assert(listed(zhBlock).join() === zhRewards.join(), "Mandarin rotation order");
 assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
+assert(sw.includes('const CACHE = "travel-speak-v9"'), "service worker cache version");
+assert((appSource.match(/\$\{lessonBar\(/g) || []).length === 3, "X stays on the three lesson screens");
+assert(appSource.includes('aria-label="Close lesson"'), "lesson close button");
+assert(appSource.includes("topbar(course.name)") && appSource.includes("topbar(unit.title)"), "course and unit keep their headers");
+
+const tone1 = toneContour(1);
+const tone2 = toneContour(2);
+const tone3 = toneContour(3);
+const tone4 = toneContour(4);
+const span = (shape) => Math.max(...shape.pitches) - Math.min(...shape.pitches);
+assert(tone1.pitches.every((pitch) => pitch === tone1.pitches[0]) && tone1.pitches[0] >= 1.35, "tone 1 high and flat");
+assert(tone1.ms >= 700 && tone1.ms > tone4.ms * 2, "tone 1 longer than the fall");
+assert(tone2.pitches.at(-1) - tone2.pitches[0] >= 0.36 * 1.5, "tone 2 rise is widened");
+assert(tone2.pitches[0] < 0.9 && tone2.pitches.at(-1) > 1.5, "tone 2 big rise");
+assert(tone3.pitches[1] === Math.min(...tone3.pitches) && tone3.pitches[1] <= 0.6, "tone 3 deep dip");
+assert(tone3.pitches.at(-1) > tone3.pitches[0], "tone 3 rises after the dip");
+assert(tone3.pitches[0] - tone3.pitches[1] >= 0.22 * 1.5, "tone 3 dip is widened");
+assert(tone4.pitches[0] - tone4.pitches.at(-1) >= 0.42 * 1.5 && tone4.ms <= 380, "tone 4 sharp steep fall");
+assert(span(tone2) > span(tone1) && span(tone4) > 0.6, "contours are dramatic");
+assert(JSON.stringify(tonesFromPinyin("mā má mǎ mà ma")) === JSON.stringify([1, 2, 3, 4, 0]), "pinyin tones");
+assert(JSON.stringify(tonesFromPinyin("bú shì")) === JSON.stringify([2, 4]), "two syllables");
+assert(JSON.stringify(tonesFromPinyin("ní hǎo")) === JSON.stringify([2, 3]), "hello tones");
+assert(speechForTone(1).rate < 0.82 && speechForTone(1).pitch > 1.2, "tone 1 speech slower and higher");
+assert(speechForTone(3).pitch < 0.85 && speechForTone(3).rate < 0.82, "tone 3 speech lower and slower");
+assert(speechForTone(4).rate < 0.82 && speechForTone(4).pitch > 1.1, "tone 4 speech slower");
+const mandarin = COURSES.find((item) => item.id === "zh");
+for (const slide of mandarin.sounds.slides) {
+  for (const example of slide.examples) {
+    assert(tonesFromPinyin(example.roman).length > 0, `tone lesson example ${example.roman}`);
+  }
+}
+for (const item of mandarin.sounds.quiz) {
+  if (!item.speak) continue;
+  assert(tonesFromPinyin(item.speak.roman).length > 0, `tone quiz ${item.speak.script}`);
+}
 
 const total = COURSES.reduce((n, c) => n + c.units.reduce((m, u) => m + u.phrases.length, 0), 0);
 console.log(`phrases: ${total}`);
