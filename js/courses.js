@@ -90,13 +90,13 @@ const mandarinSounds = {
       prompt: "You hear chá, tea. Which tone is that?",
       options: ["Rising, the second", "Falling, the fourth", "Flat, the first", "Dipping, the third"],
       answer: 0,
-      speak: { script: "茶", label: "Play chá" },
+      speak: { script: "茶", label: "Play chá", roman: "chá" },
     },
     {
       prompt: "How do you say 不是, “no”?",
       options: ["Bú shì", "Bù shì", "Bú sī", "Bù sì"],
       answer: 0,
-      speak: { script: "不是", label: "Play it" },
+      speak: { script: "不是", label: "Play it", roman: "bú shì" },
       reveal: "不 becomes bú before a falling tone.",
     },
     {
