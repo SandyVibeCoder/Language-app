@@ -878,11 +878,58 @@ function renderDone(course) {
     </footer>`;
 }
 
-const REWARD_POSTERS = [
+const ZH_REWARDS = [
   {
     src: "images/reward-taiwan-beach.webp",
     alt: "Retro travel poster of a beach day in Taiwan, with palms and bubble tea.",
   },
+  {
+    src: "images/reward-lantern-beach.webp",
+    alt: "Retro travel poster of a sunset beach strung with paper lanterns.",
+  },
+  {
+    src: "images/reward-sailboat.webp",
+    alt: "Retro travel poster of a sailboat in a green island bay.",
+  },
+  {
+    src: "images/reward-tw-01.webp",
+    alt: "Retro travel poster of a lantern-lit night market.",
+  },
+  {
+    src: "images/reward-tw-02.webp",
+    alt: "Retro travel poster of a fruit stall with pineapples and papayas.",
+  },
+  {
+    src: "images/reward-tw-03.webp",
+    alt: "Retro travel poster of a quiet turquoise cove under palm trees.",
+  },
+  {
+    src: "images/reward-tw-04.webp",
+    alt: "Retro travel poster of a steaming pool in a forest gorge.",
+  },
+  {
+    src: "images/reward-tw-05.webp",
+    alt: "Retro travel poster of stone stairs under strings of lanterns.",
+  },
+  {
+    src: "images/reward-tw-06.webp",
+    alt: "Retro travel poster of a scooter on a coastal road.",
+  },
+  {
+    src: "images/reward-tw-07.webp",
+    alt: "Retro travel poster of bubble tea at a night-market stall.",
+  },
+  {
+    src: "images/reward-tw-08.webp",
+    alt: "Retro travel poster of a waterfall in a green gorge.",
+  },
+  {
+    src: "images/reward-tw-09.webp",
+    alt: "Retro travel poster of a harbor at sunset, with fishing boats.",
+  },
+];
+
+const JA_REWARDS = [
   {
     src: "images/reward-japan-cherry.webp",
     alt: "Retro travel poster of a Japan beach under cherry blossoms, with Mount Fuji.",
@@ -892,26 +939,50 @@ const REWARD_POSTERS = [
     alt: "Retro travel poster of a surf beach in Japan, with Mount Fuji.",
   },
   {
-    src: "images/reward-lantern-beach.webp",
-    alt: "Retro travel poster of a sunset beach strung with paper lanterns.",
-  },
-  {
     src: "images/reward-hot-spring.webp",
     alt: "Retro travel poster of a mountain hot spring in autumn.",
   },
   {
-    src: "images/reward-sailboat.webp",
-    alt: "Retro travel poster of a sailboat in a green island bay.",
+    src: "images/reward-jp-01.webp",
+    alt: "Retro travel poster of a park bench under cherry blossoms.",
+  },
+  {
+    src: "images/reward-jp-02.webp",
+    alt: "Retro travel poster of an outdoor hot spring beside a wooden deck.",
+  },
+  {
+    src: "images/reward-jp-03.webp",
+    alt: "Retro travel poster of a sunny beach with dunes.",
+  },
+  {
+    src: "images/reward-jp-04.webp",
+    alt: "Retro travel poster of an autumn river under red maples.",
+  },
+  {
+    src: "images/reward-jp-05.webp",
+    alt: "Retro travel poster of a lantern-lit canal at night.",
+  },
+  {
+    src: "images/reward-jp-06.webp",
+    alt: "Retro travel poster of a hot spring in the snow, with mountains behind it.",
+  },
+  {
+    src: "images/reward-jp-07.webp",
+    alt: "Retro travel poster of a wooden veranda beside a raked-sand garden.",
+  },
+  {
+    src: "images/reward-jp-08.webp",
+    alt: "Retro travel poster of a path through a bamboo grove.",
+  },
+  {
+    src: "images/reward-jp-09.webp",
+    alt: "Retro travel poster of a garden pond with koi and a stone lantern.",
   },
 ];
 
-// Each course walks the same six posters from a different start, so both trips see every picture.
-const REWARD_OFFSET = { zh: 0, ja: 3 };
-
 function rewardFor(course, unitIndex) {
-  const offset = REWARD_OFFSET[course.id] ?? 0;
-  const index = (Math.max(0, unitIndex) + offset) % REWARD_POSTERS.length;
-  return REWARD_POSTERS[index];
+  const posters = course.id === "ja" ? JA_REWARDS : ZH_REWARDS;
+  return posters[Math.max(0, unitIndex) % posters.length];
 }
 
 function backSvg() {

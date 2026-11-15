@@ -1,4 +1,4 @@
-const CACHE = "travel-speak-v5";
+const CACHE = "travel-speak-v6";
 
 const ASSETS = [
   "./",
@@ -14,11 +14,29 @@ const ASSETS = [
   "./icons/icon-512.png",
   "./icons/icon-maskable.png",
   "./images/reward-taiwan-beach.webp",
+  "./images/reward-lantern-beach.webp",
+  "./images/reward-sailboat.webp",
+  "./images/reward-tw-01.webp",
+  "./images/reward-tw-02.webp",
+  "./images/reward-tw-03.webp",
+  "./images/reward-tw-04.webp",
+  "./images/reward-tw-05.webp",
+  "./images/reward-tw-06.webp",
+  "./images/reward-tw-07.webp",
+  "./images/reward-tw-08.webp",
+  "./images/reward-tw-09.webp",
   "./images/reward-japan-cherry.webp",
   "./images/reward-japan-surf.webp",
-  "./images/reward-lantern-beach.webp",
   "./images/reward-hot-spring.webp",
-  "./images/reward-sailboat.webp",
+  "./images/reward-jp-01.webp",
+  "./images/reward-jp-02.webp",
+  "./images/reward-jp-03.webp",
+  "./images/reward-jp-04.webp",
+  "./images/reward-jp-05.webp",
+  "./images/reward-jp-06.webp",
+  "./images/reward-jp-07.webp",
+  "./images/reward-jp-08.webp",
+  "./images/reward-jp-09.webp",
 ];
 
 self.addEventListener("install", (event) => {
