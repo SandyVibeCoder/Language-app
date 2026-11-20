@@ -1,4 +1,4 @@
-const CACHE = "travel-speak-v11";
+const CACHE = "travel-speak-v14";
 
 const ASSETS = [
   "./",
@@ -37,6 +37,22 @@ const ASSETS = [
   "./images/reward-jp-07.webp",
   "./images/reward-jp-08.webp",
   "./images/reward-jp-09.webp",
+  "./images/reward-es-01.webp",
+  "./images/reward-es-02.webp",
+  "./images/reward-es-03.webp",
+  "./images/reward-es-04.webp",
+  "./images/reward-es-05.webp",
+  "./images/reward-es-06.webp",
+  "./images/reward-es-07.webp",
+  "./images/reward-es-08.webp",
+  "./images/reward-de-01.webp",
+  "./images/reward-de-02.webp",
+  "./images/reward-de-03.webp",
+  "./images/reward-de-04.webp",
+  "./images/reward-de-05.webp",
+  "./images/reward-de-06.webp",
+  "./images/reward-de-07.webp",
+  "./images/reward-de-08.webp",
 ];
 
 self.addEventListener("install", (event) => {

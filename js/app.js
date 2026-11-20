@@ -69,6 +69,7 @@ function isStandalone() {
 }
 
 function scriptLang(course) {
+  if (course.scriptLang) return course.scriptLang;
   return course.id === "zh" ? "zh-Hant" : "ja";
 }
 
@@ -638,7 +639,7 @@ function onClick(event) {
     const slow = action === "slow";
     if (action === "example") {
       const example = step?.examples?.[Number(el.dataset.index)];
-      if (example) playLine(example.script, course.voice, example.roman, slow);
+      if (example) playLine(example.speak || example.script, course.voice, example.roman, slow);
       return;
     }
     if (step?.speak?.script) playLine(step.speak.script, course.voice, step.speak.roman || "", slow);
@@ -895,9 +896,9 @@ function renderHome() {
   return `
     <main class="main home">
       ${banner()}
-      <p class="eyebrow">For the trip</p>
+      <p class="eyebrow">Your courses</p>
       <h1>Travel Speak</h1>
-      <p class="lede">Say a little in Taiwan and Japan. You don't have to read the writing.</p>
+      <p class="lede">Say a little Mandarin, Japanese, Spanish, and German. You don't have to read the writing.</p>
       <section class="stats" aria-label="Progress">
         <div class="stat"><strong>${streak}</strong><span>${streak === 1 ? "day streak" : "day streak"}</span></div>
         <div class="stat"><strong>${state.xp}</strong><span>XP</span></div>
@@ -1321,8 +1322,79 @@ const JA_REWARDS = [
   },
 ];
 
+const ES_REWARDS = [
+  {
+    src: "images/reward-es-01.webp",
+    alt: "Retro travel poster of a Pacific beach at sunset, with palm trees and a sailboat.",
+  },
+  {
+    src: "images/reward-es-02.webp",
+    alt: "Retro travel poster of a stepped stone pyramid rising above the jungle.",
+  },
+  {
+    src: "images/reward-es-03.webp",
+    alt: "Retro travel poster of blue agave fields below distant mountains.",
+  },
+  {
+    src: "images/reward-es-04.webp",
+    alt: "Retro travel poster of a colorful colonial street with a church dome.",
+  },
+  {
+    src: "images/reward-es-05.webp",
+    alt: "Retro travel poster of a cenote, with sunlight falling into turquoise water.",
+  },
+  {
+    src: "images/reward-es-06.webp",
+    alt: "Retro travel poster of tall cactus in the desert under a rising moon.",
+  },
+  {
+    src: "images/reward-es-07.webp",
+    alt: "Retro travel poster of hot-air balloons drifting over an old valley at sunrise.",
+  },
+  {
+    src: "images/reward-es-08.webp",
+    alt: "Retro travel poster of colorful paper banners strung over a plaza at night.",
+  },
+];
+
+const DE_REWARDS = [
+  {
+    src: "images/reward-de-01.webp",
+    alt: "Retro travel poster of a castle on a hill above a river and vineyards.",
+  },
+  {
+    src: "images/reward-de-02.webp",
+    alt: "Retro travel poster of an alpine lake below snowy peaks, with a wooden dock.",
+  },
+  {
+    src: "images/reward-de-03.webp",
+    alt: "Retro travel poster of a row of half-timbered houses with flower boxes.",
+  },
+  {
+    src: "images/reward-de-04.webp",
+    alt: "Retro travel poster of red balloons rising over a city skyline at dusk.",
+  },
+  {
+    src: "images/reward-de-05.webp",
+    alt: "Retro travel poster of a wooden cabin in a pine forest.",
+  },
+  {
+    src: "images/reward-de-06.webp",
+    alt: "Retro travel poster of a snowy Christmas market at night, with lit stalls.",
+  },
+  {
+    src: "images/reward-de-07.webp",
+    alt: "Retro travel poster of a striped lighthouse and wicker beach chairs by the North Sea.",
+  },
+  {
+    src: "images/reward-de-08.webp",
+    alt: "Retro travel poster of a blue-and-white maypole in a mountain village.",
+  },
+];
+
 function rewardFor(course, unitIndex) {
-  const posters = course.id === "ja" ? JA_REWARDS : ZH_REWARDS;
+  const sets = { zh: ZH_REWARDS, ja: JA_REWARDS, es: ES_REWARDS, de: DE_REWARDS };
+  const posters = sets[course.id] || ZH_REWARDS;
   return posters[Math.max(0, unitIndex) % posters.length];
 }
 

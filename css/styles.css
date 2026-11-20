@@ -42,6 +42,14 @@ button { cursor: pointer; }
   --accent: #1c3f68;
   --soft: #d9e6f2;
 }
+#app.tone-es {
+  --accent: #1f6b4f;
+  --soft: #dcefe5;
+}
+#app.tone-de {
+  --accent: #3d3a5c;
+  --soft: #e2e0ef;
+}
 #app.screen {
   height: 100dvh;
   min-height: 100dvh;
@@ -128,6 +136,8 @@ h2 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8p
 }
 .course-card.tone-zh { background: #9d3414; }
 .course-card.tone-ja { background: #1c3f68; }
+.course-card.tone-es { background: #1f6b4f; }
+.course-card.tone-de { background: #3d3a5c; }
 .course-card .place { display: block; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85; }
 .course-card strong { display: block; font-size: 30px; letter-spacing: -0.03em; margin: 2px 0; }
 .course-card .meta { font-size: 15px; opacity: 0.92; }
