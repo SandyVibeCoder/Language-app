@@ -1,6 +1,6 @@
 # Travel Speak
 
-Spoken phrases for a trip to Taiwan and Japan. It is meant to live on an iPhone home screen. No account, no ads, and nothing is tracked.
+Spoken phrases in Mandarin, Japanese, Spanish, and German. It is meant to live on an iPhone home screen. No account, no ads, and nothing is tracked.
 
 **Site:** https://wsarchet.github.io/Language-app/
 
@@ -27,6 +27,8 @@ The workflow tries to turn Pages on by itself. GitHub often blocks that for the 
 
 - Mandarin for Taiwan, in pinyin with tone marks. Traditional characters are small, next to the answer.
 - Japanese for Japan, in romaji with macrons. Kana and kanji are small, next to the answer.
+- Spanish as spoken casually in Mexico, for following conversations around you: greetings, fillers, slang, reactions, and fast-speech shortcuts. Lessons lean on listening. A small sound-it-out guide sits next to each answer (capitals mark the stress, rr marks a rolled r).
+- German for following the song 99 Luftballons: counting to 99, then the song's key words, then the basics. Lessons lean on listening, with a sound-it-out guide beside each answer.
 - Each course is a path of lessons. A lesson mixes meaning questions, word tiles, listening, and matching pairs. Pinyin or romaji comes first. Characters stay small.
 - Five hearts at the start of each lesson. A mistake costs one. If they run out, the lesson stops and you can try it again. Nothing is for sale.
 - A little XP, a daily streak, and a daily goal of 20 XP. No ranking and no account.
