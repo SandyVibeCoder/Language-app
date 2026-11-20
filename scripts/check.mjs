@@ -63,8 +63,8 @@ function assert(cond, message) {
   }
 }
 
-assert(COURSES.length === 2, "two courses");
-assert(new Set(COURSES.map((c) => c.id)).size === 2, "unique course ids");
+assert(COURSES.length === 4, "four courses");
+assert(new Set(COURSES.map((c) => c.id)).size === 4, "unique course ids");
 
 for (const course of COURSES) {
   assert(course.units.length === 8, `${course.id} has 8 units`);
@@ -89,6 +89,14 @@ for (const course of COURSES) {
         for (const ch of phrase.script + (phrase.speak || "")) {
           assert(!simplifiedOnly.has(ch), `simplified char ${ch} in ${phrase.id}`);
         }
+      } else if (course.id === "de") {
+        assert(!/[ǎěǐǒǔāēīōū¿¡]/u.test(phrase.roman), `stray mark in de ${phrase.id}: ${phrase.roman}`);
+        assert(/^[A-Za-zÄÖÜäöü ,'…-]+$/.test(phrase.script), `guide should be plain letters ${phrase.id}: ${phrase.script}`);
+        assert(phrase.speak && !/[?!…]/.test(phrase.speak), `de speech text ${phrase.id}`);
+      } else if (course.id === "es") {
+        assert(!/[ǎěǐǒǔāēīōū]/u.test(phrase.roman), `pinyin-style mark in es ${phrase.id}: ${phrase.roman}`);
+        assert(/^[A-Za-z ,'…-]+$/.test(phrase.script), `guide should be plain letters ${phrase.id}: ${phrase.script}`);
+        assert(phrase.speak && !/[¿¡?!…]/.test(phrase.speak), `es speech text ${phrase.id}`);
       } else {
         assert(!japaneseBanned.test(phrase.roman), `pinyin-style mark in ja ${phrase.id}: ${phrase.roman}`);
         assert(!/[一-龯]/.test(phrase.roman), `han in ja roman ${phrase.id}`);
@@ -211,7 +219,9 @@ const jaRewards = [
   "images/reward-hot-spring.webp",
   ...Array.from({ length: 9 }, (_, i) => `images/reward-jp-${String(i + 1).padStart(2, "0")}.webp`),
 ];
-const rewardFiles = [...zhRewards, ...jaRewards];
+const esRewards = Array.from({ length: 8 }, (_, i) => `images/reward-es-${String(i + 1).padStart(2, "0")}.webp`);
+const deRewards = Array.from({ length: 8 }, (_, i) => `images/reward-de-${String(i + 1).padStart(2, "0")}.webp`);
+const rewardFiles = [...zhRewards, ...jaRewards, ...esRewards, ...deRewards];
 const sw = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
 for (const file of rewardFiles) {
   const bytes = statSync(new URL("../" + file, import.meta.url)).size;
@@ -221,15 +231,21 @@ for (const file of rewardFiles) {
 assert(new Set(zhRewards).size === 12, "Mandarin has 12 posters");
 assert(new Set(jaRewards).size === 12, "Japanese has 12 posters");
 assert(zhRewards.every((file) => !jaRewards.includes(file)), "the two courses do not share a poster");
+assert(new Set(esRewards).size === 8 && esRewards.every((file) => !zhRewards.includes(file) && !jaRewards.includes(file)), "Spanish has its own 8 posters");
+assert(new Set(rewardFiles).size === rewardFiles.length, "no course shares a poster");
 
 const appSource = readFileSync(new URL("../js/app.js", import.meta.url), "utf8");
 const zhBlock = appSource.split("const ZH_REWARDS")[1]?.split("const JA_REWARDS")[0] || "";
-const jaBlock = appSource.split("const JA_REWARDS")[1]?.split("function rewardFor")[0] || "";
+const jaBlock = appSource.split("const JA_REWARDS")[1]?.split("const ES_REWARDS")[0] || "";
+const esBlock = appSource.split("const ES_REWARDS")[1]?.split("const DE_REWARDS")[0] || "";
+const deBlock = appSource.split("const DE_REWARDS")[1]?.split("function rewardFor")[0] || "";
 const listed = (block) => [...block.matchAll(/src: "(images\/reward-[^"]+)"/g)].map((match) => match[1]);
 assert(listed(zhBlock).join() === zhRewards.join(), "Mandarin rotation order");
 assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
+assert(listed(esBlock).join() === esRewards.join(), "Spanish rotation order");
+assert(listed(deBlock).join() === deRewards.join(), "German rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v11"'), "service worker cache version");
+assert(sw.includes('const CACHE = "travel-speak-v14"'), "service worker cache version");
 assert((appSource.match(/\$\{lessonBar\(/g) || []).length >= 2, "X stays on lesson screens");
 assert(appSource.includes('aria-label="Close lesson"'), "lesson close button");
 assert(appSource.includes("topbar(course.name)"), "course keeps its back header");
@@ -270,8 +286,8 @@ for (const course of COURSES) {
   const path = coursePath(course);
   assert(path.length >= 12, `${course.id} path length ${path.length}`);
   const soundsAt = path.findIndex((node) => node.kind === "sounds");
-  const greetDone = path.findIndex((node) => node.id === "greetings-check");
-  assert(soundsAt > greetDone && greetDone > 0, `${course.id} tones come after greetings`);
+  const firstDone = path.findIndex((node) => node.id === `${course.units[0].id}-check`);
+  assert(soundsAt > firstDone && firstDone > 0, `${course.id} sounds come after the first unit`);
   assert(path[0].kind === "lesson", `${course.id} starts with a lesson`);
   assert(nodeUnlocked(blankState(), course, 0) && !nodeUnlocked(blankState(), course, 1), `${course.id} first node only`);
   for (const node of path) {
@@ -279,9 +295,14 @@ for (const course of COURSES) {
     const built = buildNodeLesson(course, node, blankState(), () => 0.3);
     assert(built.steps.length === 7 && built.steps.length < LESSON_LIMIT, `${course.id}/${node.id} length ${built.steps.length}`);
     const types = new Set(built.steps.map((step) => step.type));
-    assert(types.has("choice") && types.has("tiles") && types.has("listen") && types.has("match"), `${course.id}/${node.id} mix`);
     const match = built.steps.find((step) => step.type === "match");
-    assert(match.pairs.length === 5, `${course.id}/${node.id} pairs`);
+    assert(match && match.pairs.length === 5, `${course.id}/${node.id} pairs`);
+    if (course.focus === "listen") {
+      const heard = built.steps.filter((step) => step.type === "listen").length;
+      assert(heard >= 4 && types.has("choice") && !types.has("tiles"), `${course.id}/${node.id} listening mix`);
+      continue;
+    }
+    assert(types.has("choice") && types.has("tiles") && types.has("listen"), `${course.id}/${node.id} mix`);
     const tiles = built.steps.find((step) => step.type === "tiles");
     assert(tiles.tiles.length > tiles.answer.length, `${course.id}/${node.id} distractors`);
   }

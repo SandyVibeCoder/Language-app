@@ -1,7 +1,7 @@
 {
   "name": "Travel Speak",
   "short_name": "Speak",
-  "description": "Spoken travel phrases for Taiwan and Japan. Saved on your phone.",
+  "description": "Spoken phrases in Mandarin, Japanese, Spanish, and German. Saved on your phone.",
   "start_url": "./index.html",
   "scope": "./",
   "id": "./",

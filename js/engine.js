@@ -525,7 +525,7 @@ function dedupePhrases(list) {
 }
 
 function wordsOf(roman) {
-  const clean = String(roman || "").replace(/[…?.？。!！]/g, "").trim();
+  const clean = String(roman || "").replace(/[…?.？。!！¿¡,]/g, "").trim();
   const parts = clean.split(/\s+/).filter(Boolean);
   return parts.length ? parts : [clean || String(roman)];
 }
@@ -607,9 +607,22 @@ function matchStep(phrases) {
   };
 }
 
-function buildMix(title, fresh, pool, rng) {
+function buildMix(title, fresh, pool, rng, focus) {
   const order = dedupePhrases([...fresh, ...rng.shuffle(pool)]);
   const at = (index) => order[index % order.length];
+  if (focus === "listen") {
+    // Listening courses (eavesdropping, following a song) hear more and build less.
+    const heard = [
+      listenStep(at(0), pool, rng),
+      choiceStepNew(at(1), "toEn", pool, rng),
+      listenStep(at(2), pool, rng),
+      listenStep(at(3), pool, rng),
+      choiceStepNew(at(4), "toEn", pool, rng),
+      listenStep(at(1), pool, rng),
+      matchStep(rng.shuffle(pool).slice(0, Math.min(5, pool.length))),
+    ];
+    return { kind: "mix", title, steps: heard.slice(0, BASE_QUESTIONS) };
+  }
   const steps = [
     choiceStepNew(at(0), "toRoman", pool, rng),
     choiceStepNew(at(1), "toEn", pool, rng),
@@ -655,5 +668,5 @@ export function buildNodeLesson(course, node, state, random = Math.random) {
     pool = dedupePhrases([...fresh, ...review]);
   }
   if (pool.length < 5) pool = dedupePhrases([...pool, ...rng.shuffle(all)]).slice(0, 5);
-  return buildMix(node.title, fresh, pool, rng);
+  return buildMix(node.title, fresh, pool, rng, course.focus);
 }
