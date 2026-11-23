@@ -21,6 +21,8 @@ import {
   missCountForUnit,
   normalizeState,
   recordMiss,
+  scriptParts,
+  speakText,
   speechForTone,
   toneContour,
   tonesFromPinyin,
@@ -247,7 +249,11 @@ assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(listed(esBlock).join() === esRewards.join(), "Spanish rotation order");
 assert(listed(deBlock).join() === deRewards.join(), "German rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v21"'), "service worker cache version");
+assert(sw.includes('const CACHE = "travel-speak-v22"'), "service worker cache version");
+assert(sw.includes("./js/hear.js"), "character map is cached");
+assert(appSource.includes("utterance.lang = lang"), "speech sets utterance.lang");
+assert(appSource.includes('id.startsWith("zh-tw")') && appSource.includes('id.startsWith("zh-cn")'), "Mandarin voice prefers Taiwan, then China");
+assert(appSource.includes("step.says"), "each tile speaks its character");
 assert(appSource.includes("session.tiles.length > 0"), "Check turns on after the first tile");
 assert(appSource.includes('toLocaleLowerCase("en-US")'), "tile answers ignore case");
 assert(appSource.includes("data-say"), "target-language text can be tapped to hear");
@@ -291,6 +297,36 @@ for (const item of mandarin.sounds.quiz) {
   assert(tonesFromPinyin(item.speak.roman).length > 0, `tone quiz ${item.speak.script}`);
 }
 
+const nativeScript = /[\u3040-\u30ff\u3400-\u9fff]/;
+const latinSpeech = /[A-Za-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]/;
+for (const course of COURSES) {
+  if (course.id !== "zh" && course.id !== "ja") continue;
+  for (const unit of course.units) {
+    for (const phrase of unit.phrases) {
+      const parts = scriptParts(phrase);
+      assert(parts, `${course.id}/${phrase.id} has a character for each spoken word`);
+      const spoken = speakText(phrase);
+      assert(nativeScript.test(spoken) && !latinSpeech.test(spoken), `${course.id}/${phrase.id} speaks ${spoken}`);
+      if (phrase.hear) {
+        const joined = phrase.hear.replace(/\s+/g, "");
+        const written = phrase.script.replace(/[…？?。、「」！!，,]/g, "").replace("Wi-Fi", "ワイファイ");
+        assert(joined === written, `${course.id}/${phrase.id} hear lines up with ${written}`);
+      }
+    }
+  }
+  for (const slide of course.sounds.slides) {
+    for (const example of slide.examples || []) {
+      assert(nativeScript.test(example.script || "") && !latinSpeech.test(example.script || ""), `${course.id} example ${example.roman}`);
+    }
+  }
+  for (const item of course.sounds.quiz) {
+    if (!item.speak) continue;
+    assert(nativeScript.test(item.speak.script) && !latinSpeech.test(item.speak.script), `${course.id} quiz speak ${item.speak.script}`);
+  }
+}
+const dui = mandarin.units.flatMap((unit) => unit.phrases).find((phrase) => phrase.roman === "Duì");
+assert(dui && scriptParts(dui)[0] === "對" && speakText(dui) === "對", "Duì is spoken as 對");
+
 for (const course of COURSES) {
   const path = coursePath(course);
   assert(path.length >= 12, `${course.id} path length ${path.length}`);
@@ -329,6 +365,12 @@ for (const course of COURSES) {
       if (word === lead) continue;
       const upper = word.charAt(0) !== word.charAt(0).toLocaleLowerCase("en-US");
       if (upper) assert(marked.has(word.toLocaleLowerCase("en-US")), `${course.id}/${node.id} capital ${word}`);
+    }
+    if (course.id === "zh" || course.id === "ja") {
+      assert(tiles.says?.length === tiles.tiles.length, `${course.id}/${node.id} tile speech`);
+      for (const say of tiles.says) {
+        assert(nativeScript.test(say) && !latinSpeech.test(say), `${course.id}/${node.id} speaks ${say}`);
+      }
     }
   }
 }

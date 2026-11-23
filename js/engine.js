@@ -369,9 +369,23 @@ export function phraseById(unit, id) {
   return unit.phrases.find((phrase) => phrase.id === id) || null;
 }
 
+const NATIVE_CHAR = /[\u3040-\u30ff\u3400-\u9fff]/;
+const LATIN_LETTER = /[A-Za-zĀ-žāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]/;
+
+function cleanSpoken(text) {
+  return String(text || "").replace(/[…？?。、「」！!，,]/g, "").trim();
+}
+
 export function speakText(phrase) {
-  if (phrase.speak) return phrase.speak;
-  return phrase.script.replace(/[…？?。、「」]/g, "").trim();
+  const spoken = cleanSpoken(phrase.speak);
+  const written = cleanSpoken(phrase.script);
+  if (spoken && NATIVE_CHAR.test(spoken) && !LATIN_LETTER.test(spoken)) return spoken;
+  if (phrase.hear && NATIVE_CHAR.test(phrase.hear) && LATIN_LETTER.test(written)) {
+    return String(phrase.hear).replace(/\s+/g, "");
+  }
+  if (written && NATIVE_CHAR.test(written) && !LATIN_LETTER.test(written)) return written;
+  if (spoken) return spoken;
+  return written;
 }
 
 export function nextLessonId(state, courseId, unit) {
@@ -559,6 +573,20 @@ function wordsOf(roman) {
   return parts.length ? parts : [clean || String(roman)];
 }
 
+export function scriptParts(phrase) {
+  const words = wordsOf(phrase.roman);
+  if (phrase.hear) {
+    const parts = String(phrase.hear).trim().split(/\s+/).filter(Boolean);
+    if (parts.length === words.length && parts.every((part) => NATIVE_CHAR.test(part) && !LATIN_LETTER.test(part))) {
+      return parts;
+    }
+    return null;
+  }
+  const glyphs = [...cleanSpoken(phrase.script)];
+  if (glyphs.length === words.length && glyphs.every((glyph) => NATIVE_CHAR.test(glyph))) return glyphs;
+  return null;
+}
+
 function caseKey(word) {
   return word.toLocaleLowerCase("en-US");
 }
@@ -624,30 +652,42 @@ function listenStep(phrase, pool, rng) {
   };
 }
 
+function tileItem(word, say, isStart, intrinsic) {
+  const text = displayTile(word, isStart, intrinsic);
+  return { text, say: say || text };
+}
+
 function tileStep(phrase, pool, rng) {
   const intrinsic = intrinsicCapitals(pool);
-  const answer = wordsOf(phrase.roman).map((word, index) => displayTile(word, index === 0, intrinsic));
-  const used = new Set(answer.map(caseKey));
+  const parts = scriptParts(phrase);
+  const answerItems = wordsOf(phrase.roman).map((word, index) =>
+    tileItem(word, parts ? parts[index] : "", index === 0, intrinsic),
+  );
+  const used = new Set(answerItems.map((item) => caseKey(item.text)));
   const distractors = [];
   for (const other of rng.shuffle(pool)) {
     if (other.id === phrase.id) continue;
-    for (const word of wordsOf(other.roman)) {
-      const shown = displayTile(word, false, intrinsic);
-      const key = caseKey(shown);
+    const otherParts = scriptParts(other);
+    const otherWords = wordsOf(other.roman);
+    for (let index = 0; index < otherWords.length; index += 1) {
+      const item = tileItem(otherWords[index], otherParts ? otherParts[index] : "", false, intrinsic);
+      const key = caseKey(item.text);
       if (used.has(key)) continue;
       used.add(key);
-      distractors.push(shown);
+      distractors.push(item);
       if (distractors.length === 3) break;
     }
     if (distractors.length === 3) break;
   }
+  const tiles = rng.shuffle([...answerItems, ...distractors]);
   return {
     type: "tiles",
     phraseId: phrase.id,
     prompt: phrase.en,
     promptLabel: "Tap the words in order",
-    answer,
-    tiles: rng.shuffle([...answer, ...distractors]),
+    answer: answerItems.map((item) => item.text),
+    tiles: tiles.map((item) => item.text),
+    says: tiles.map((item) => item.say),
   };
 }
 

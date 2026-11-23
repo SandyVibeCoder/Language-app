@@ -1,4 +1,4 @@
-const CACHE = "travel-speak-v21";
+const CACHE = "travel-speak-v22";
 
 const ASSETS = [
   "./",
@@ -7,6 +7,7 @@ const ASSETS = [
   "./js/app.js",
   "./js/engine.js",
   "./js/courses.js",
+  "./js/hear.js",
   "./js/account.js",
   "./js/firebase-config.js",
   "./manifest.webmanifest",

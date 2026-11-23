@@ -188,23 +188,33 @@ function stopSpeech() {
   }
 }
 
+function voiceScore(lang, id) {
+  const want = String(lang || "").toLowerCase().replace(/_/g, "-");
+  const base = want.slice(0, 2);
+  if (base === "zh") {
+    if (id === "zh-tw" || id.startsWith("zh-tw")) return 6;
+    if (id === "zh-hant" || id.startsWith("zh-hant")) return 5;
+    if (id === "zh-cn" || id.startsWith("zh-cn") || id.startsWith("zh-hans")) return 4;
+    if (id.startsWith("zh")) return 2;
+    return 0;
+  }
+  if (id === want) return 5;
+  if (id.startsWith(`${want}-`) || id.startsWith(want)) return 4;
+  if (id.startsWith(`${base}-`)) return 2;
+  if (id.startsWith(base)) return 1;
+  return 0;
+}
+
 function pickVoice(lang) {
   const synth = window.speechSynthesis;
   if (!synth) return null;
   const voices = synth.getVoices();
   if (!voices.length) return null;
   const norm = (value) => String(value || "").toLowerCase().replace(/_/g, "-");
-  const want = norm(lang);
-  const base = want.slice(0, 2);
   let best = null;
   let bestScore = 0;
   for (const voice of voices) {
-    const id = norm(voice.lang);
-    let score = 0;
-    if (id === want) score = 5;
-    else if (id.startsWith(`${want}-`) || id.startsWith(want)) score = 4;
-    else if (id.startsWith(`${base}-`)) score = 2;
-    else if (id.startsWith(base)) score = 1;
+    const score = voiceScore(lang, norm(voice.lang));
     if (score > bestScore) {
       best = voice;
       bestScore = score;
@@ -236,9 +246,9 @@ function speak(text, lang, onstart, tune) {
       resolve(token === voiceToken ? ok : false);
     };
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
     const voice = pickVoice(lang);
     if (voice) utterance.voice = voice;
+    utterance.lang = lang;
     const zh = String(lang).toLowerCase().startsWith("zh");
     utterance.rate = tune?.rate ?? (zh ? 0.82 : 0.9);
     if (tune?.pitch) utterance.pitch = tune.pitch;
@@ -768,7 +778,7 @@ function onClick(event) {
     if (session.feedback) return;
     const key = el.dataset.key;
     if (session.tiles.some((tile) => tile.key === key)) session.tiles = session.tiles.filter((tile) => tile.key !== key);
-    else session.tiles.push({ key, text: el.dataset.text });
+    else session.tiles.push({ key, text: el.dataset.text, say: el.dataset.say || el.dataset.text });
     render();
     return;
   }
@@ -1350,13 +1360,14 @@ function renderTiles(course, step) {
   const chosen = session.tiles
     .map(
       (tile) =>
-        `<button type="button" class="tile say" data-action="tile" data-key="${esc(tile.key)}" data-text="${esc(tile.text)}" data-say="${esc(tile.text)}">${esc(tile.text)}</button>`,
+        `<button type="button" class="tile say" data-action="tile" data-key="${esc(tile.key)}" data-text="${esc(tile.text)}" data-say="${esc(tile.say || tile.text)}">${esc(tile.text)}</button>`,
     )
     .join("");
   const bank = step.tiles
     .map((word, index) => {
       const used = session.tiles.some((tile) => tile.key === String(index));
-      return `<button type="button" class="tile say" data-action="tile" data-key="${index}" data-text="${esc(word)}" data-say="${esc(word)}" ${used ? "disabled" : ""}>${esc(word)}</button>`;
+      const say = step.says?.[index] || word;
+      return `<button type="button" class="tile say" data-action="tile" data-key="${index}" data-text="${esc(word)}" data-say="${esc(say)}" ${used ? "disabled" : ""}>${esc(word)}</button>`;
     })
     .join("");
   return `

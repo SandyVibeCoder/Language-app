@@ -1,6 +1,8 @@
 // Travel phrases. English and pinyin/romaji are the lesson.
 // script is the small traditional characters or kana/kanji beside the answer.
 // hint is optional. speak is optional audio when the line on screen is a pattern.
+// hear (from hear.js) is the character form of each roman word, for speech.
+import { HEAR } from "./hear.js";
 
 function p(id, en, roman, script, hint, speak) {
   const phrase = { id, en, roman, script };
@@ -1339,6 +1341,15 @@ const german = {
     ),
   ],
 };
+
+for (const course of [mandarin, japanese]) {
+  const map = HEAR[course.id] || {};
+  for (const unit of course.units) {
+    for (const phrase of unit.phrases) {
+      if (map[phrase.id]) phrase.hear = map[phrase.id];
+    }
+  }
+}
 
 export const COURSES = [mandarin, japanese, spanish, german];
 
