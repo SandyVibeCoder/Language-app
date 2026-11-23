@@ -1,6 +1,6 @@
 # Travel Speak
 
-Spoken phrases in Mandarin, Japanese, Spanish, and German. It is meant to live on an iPhone home screen. No account, no ads, and nothing is tracked.
+Spoken phrases in Mandarin, Japanese, Spanish, and German. It is meant to live on an iPhone home screen. An account is required. No ads, and nothing is tracked beyond that account.
 
 **Site:** https://sandyvibecoder.github.io/Language-app/
 
@@ -31,7 +31,7 @@ The workflow tries to turn Pages on by itself. GitHub often blocks that for the 
 - German for following the song 99 Luftballons: counting to 99, then the song's key words, then the basics. Lessons lean on listening, with a sound-it-out guide beside each answer.
 - Each course is a path of lessons. A lesson mixes meaning questions, word tiles, listening, and matching pairs. Pinyin or romaji comes first. Characters stay small.
 - Five hearts at the start of each lesson. A mistake costs one. If they run out, the lesson stops and you can try it again. Nothing is for sale.
-- A little XP, a daily streak, and a daily goal of 20 XP. No ranking and no account.
+- A little XP, a daily streak, and a daily goal of 20 XP. No ranking. An account is required to open the lessons.
 
 Phrases live in `js/courses.js` if you ever want to change a line.
 
@@ -41,7 +41,7 @@ Nothing is sent to a server. There is no analytics. Progress is saved in the pho
 
 ## Accounts (optional)
 
-People can create an account with a username and password. Progress saves to the account automatically and syncs across devices. Without a Firebase config, the app runs exactly as before and shows no sign-in button.
+An account is required. Signed-out visitors see only the sign-in screen. Progress saves to the account automatically and syncs across devices. The first sign-in on a phone merges any progress already stored there with the account.
 
 Setup, about 10 minutes, free tier:
 
@@ -50,7 +50,7 @@ Setup, about 10 minutes, free tier:
 3. **Firestore Database** → Create database → production mode → pick a US region.
 4. Firestore → **Rules** → paste the contents of `firestore.rules` → Publish.
 5. Project settings → General → Your apps → add a **Web** app. Copy the `firebaseConfig` object into `js/firebase-config.js`, replacing `null`.
-6. Push. "Sign in or create an account" appears on the home screen.
+6. Push. The site opens on the sign-in screen.
 
 How it works: progress still saves on the phone first, then saves to the account a moment after each change. Signing in on a new device merges both sides, so nothing is lost (finished lessons from both, the higher XP, the most recent streak).
 

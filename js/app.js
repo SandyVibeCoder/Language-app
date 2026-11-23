@@ -83,9 +83,35 @@ async function syncAfterSignIn() {
   }
 }
 
+let pendingView = null;
+
+function lockedOut() {
+  return account.enabled && !account.user;
+}
+
 function onAccountChange(user) {
-  if (user) syncAfterSignIn();
-  else render();
+  if (user) {
+    const next = pendingView;
+    pendingView = null;
+    syncAfterSignIn().finally(() => {
+      if (next && next.name && next.name !== "account") {
+        showHistory(next);
+        return;
+      }
+      if (view.name === "account") {
+        session = null;
+        view = { name: "home" };
+        writeHistory("replace");
+        resetScroll = true;
+        render();
+      }
+    });
+    return;
+  }
+  stopSpeech();
+  session = null;
+  view = { name: "account" };
+  render();
 }
 
 function esc(value) {
@@ -577,6 +603,14 @@ function restoreDone(saved) {
 
 function showHistory(saved) {
   stopSpeech();
+  if (lockedOut()) {
+    pendingView = saved && saved.name && saved.name !== "account" ? saved : { name: "home" };
+    session = null;
+    view = { name: "account" };
+    resetScroll = true;
+    render();
+    return;
+  }
   if (!saved || saved.name === "home") {
     session = null;
     view = { name: "home" };
@@ -882,8 +916,8 @@ function render() {
   const course = currentCourse();
   app.className = `${course ? `tone-${course.id}` : "tone-home"}${view.name === "lesson" ? " screen" : ""}`;
   let html = "";
-  if (view.name === "home") html = renderHome();
-  else if (view.name === "account") html = renderAccount();
+  if (lockedOut() || view.name === "account") html = renderAccount();
+  else if (view.name === "home") html = renderHome();
   else if (view.name === "course" || view.name === "unit") html = renderCourse(course);
   else html = renderLesson(course);
   app.innerHTML = html;
@@ -930,25 +964,18 @@ function banner() {
 }
 
 function accountLine() {
-  if (!account.enabled) return `<p class="fine">Saved on this phone only. No account.</p>`;
-  if (account.user) {
-    const note = account.syncing ? "Saving…" : `Signed in as ${account.user.username}. Progress saves to your account.`;
-    return `
-      <section class="account-line">
-        <p class="fine">${esc(note)}</p>
-        <button type="button" class="text" data-action="account">Account</button>
-      </section>`;
-  }
+  if (!account.enabled || !account.user) return "";
+  const note = account.syncing ? "Saving…" : `Signed in as ${account.user.username}. Progress saves to your account.`;
   return `
     <section class="account-line">
-      <p class="fine">Saved on this phone only.</p>
-      <button type="button" class="text" data-action="account">Sign in or create an account</button>
+      <p class="fine">${esc(note)}</p>
+      <button type="button" class="text" data-action="account">Account</button>
     </section>`;
 }
 
 function renderAccount() {
   const error = account.error ? `<p class="banner error" role="alert">${esc(account.error)}</p>` : "";
-  const top = topbar("Account");
+  const top = account.user ? topbar("Account") : `<header class="topbar"><h1>Travel Speak</h1></header>`;
   if (account.user) {
     const status = account.syncing ? "Saving to your account now." : "Your progress saves to your account automatically.";
     return `
@@ -960,7 +987,7 @@ function renderAccount() {
         <div class="stack">
           <button type="button" class="secondary" data-action="sign-out">Sign out</button>
         </div>
-        <p class="fine">Signing out keeps your progress on this phone.</p>
+        <p class="fine">Signing out returns you to the sign-in screen. Progress on this phone is kept for the next sign-in.</p>
       </main>`;
   }
   const creating = account.mode === "create";
@@ -969,14 +996,13 @@ function renderAccount() {
     <main class="main account">
       ${error}
       <h2>${creating ? "Create an account" : "Sign in"}</h2>
-      <p class="lede">${creating ? "Pick a username and password. Your streak, XP, and lessons will save to your account." : "Sign in to save your progress and pick it up on any device."}</p>
+      <p class="lede">${creating ? "Create an account to use the lessons. Your streak, XP, and finished lessons save to that account." : "Sign in to use the lessons. Your progress is saved to your account."}</p>
       <label class="field"><span>Username</span><input id="acct-user" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(account.draftUser || "")}"></label>
       <label class="field"><span>Password</span><input id="acct-pass" type="password" autocomplete="${creating ? "new-password" : "current-password"}"></label>
       ${creating ? `<label class="field"><span>Password again</span><input id="acct-pass2" type="password" autocomplete="new-password"></label>` : ""}
       <button type="button" class="primary" data-action="${creating ? "create-account" : "sign-in"}" ${account.busy ? "disabled" : ""}>${account.busy ? "One moment…" : creating ? "Create account" : "Sign in"}</button>
       <button type="button" class="text" data-action="toggle-mode">${creating ? "Have an account? Sign in" : "New here? Create an account"}</button>
       ${creating ? `<p class="fine">There's no email, so write your password down. If you forget it, only the app's owner can reset it.</p>` : ""}
-      <p class="fine">You don't need an account. Everything keeps working on this phone without one.</p>
     </main>`;
 }
 
@@ -1000,6 +1026,12 @@ async function accountAction(action) {
     return;
   }
   if (action === "sign-out") {
+    pendingView = null;
+    stopSpeech();
+    session = null;
+    view = { name: "account" };
+    writeHistory("replace");
+    resetScroll = true;
     await signOutAccount();
     render();
     return;
@@ -1009,12 +1041,14 @@ async function accountAction(action) {
     render();
     return;
   }
-  account.draftUser = value("acct-user");
+  const username = value("acct-user");
   const password = value("acct-pass");
+  const confirm = value("acct-pass2");
+  account.draftUser = username;
   account.busy = true;
   render();
-  if (action === "sign-in") await signIn(account.draftUser, password);
-  else if (action === "create-account") await createAccount(account.draftUser, password, value("acct-pass2"));
+  if (action === "sign-in") await signIn(username, password);
+  else if (action === "create-account") await createAccount(username, password, confirm);
   account.busy = false;
   render();
 }

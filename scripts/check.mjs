@@ -247,7 +247,7 @@ assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(listed(esBlock).join() === esRewards.join(), "Spanish rotation order");
 assert(listed(deBlock).join() === deRewards.join(), "German rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v16"'), "service worker cache version");
+assert(sw.includes('const CACHE = "travel-speak-v17"'), "service worker cache version");
 assert((appSource.match(/\$\{lessonBar\(/g) || []).length >= 2, "X stays on lesson screens");
 assert(appSource.includes('aria-label="Close lesson"'), "lesson close button");
 assert(appSource.includes("topbar(course.name)"), "course keeps its back header");
