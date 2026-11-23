@@ -1,6 +1,7 @@
 // Checks phrase data and the progress rules. No browser, no network.
 import { readFileSync, statSync } from "node:fs";
-import { COURSES } from "../js/courses.js";
+import { COURSES, courseById, unitById } from "../js/courses.js";
+import { account } from "../js/account.js";
 import {
   CORE_LESSONS,
   DAILY_GOAL,
@@ -16,6 +17,7 @@ import {
   courseUnitsDone,
   dayKey,
   makeRng,
+  mergeStates,
   missCountForUnit,
   normalizeState,
   recordMiss,
@@ -245,7 +247,7 @@ assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(listed(esBlock).join() === esRewards.join(), "Spanish rotation order");
 assert(listed(deBlock).join() === deRewards.join(), "German rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v14"'), "service worker cache version");
+assert(sw.includes('const CACHE = "travel-speak-v15"'), "service worker cache version");
 assert((appSource.match(/\$\{lessonBar\(/g) || []).length >= 2, "X stays on lesson screens");
 assert(appSource.includes('aria-label="Close lesson"'), "lesson close button");
 assert(appSource.includes("topbar(course.name)"), "course keeps its back header");
@@ -331,6 +333,32 @@ const total = COURSES.reduce((n, c) => n + c.units.reduce((m, u) => m + u.phrase
 console.log(`phrases: ${total}`);
 for (const c of COURSES) {
   console.log(c.id, c.units.map((u) => `${u.id}:${u.phrases.length}`).join(" "));
+}
+
+
+// Accounts: the app imports these, so a missing export breaks the home screen.
+assert(typeof courseById === "function" && typeof unitById === "function", "courses.js exports its helpers");
+assert(account && typeof account.enabled === "boolean", "account module loads");
+const appText = readFileSync(new URL("../js/app.js", import.meta.url), "utf8");
+assert(appText.includes('from "./account.js"'), "app wires in accounts");
+const swText = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
+assert(swText.includes("./js/account.js") && swText.includes("./js/firebase-config.js"), "account files work offline");
+
+// Merging phone progress with account progress keeps everything from both.
+{
+  const phone = { ...blankState(), xp: 40, streak: 2, lastDay: "2026-11-20", dailyDay: "2026-11-20", dailyXp: 15,
+    done: { "es:greetings-1:greetings-1": "2026-11-20" }, misses: { "es:g-onda": 2, "zh:g-hello": 1 } };
+  const cloud = { ...blankState(), xp: 120, streak: 5, lastDay: "2026-11-18", dailyDay: "2026-11-18", dailyXp: 30,
+    done: { "zh:greetings-1:greetings-1": "2026-11-10" }, misses: { "es:g-onda": 1, "ja:g-hello": 3 } };
+  const merged = mergeStates(phone, cloud);
+  assert(merged.xp === 120, "merge keeps the higher XP");
+  assert(Object.keys(merged.done).length === 2, "merge keeps lessons finished on either side");
+  assert(merged.misses["es:g-onda"] === 2 && merged.misses["ja:g-hello"] === 3 && merged.misses["zh:g-hello"] === 1, "merge keeps every miss");
+  assert(merged.lastDay === "2026-11-20" && merged.streak === 2, "merge takes the streak from the most recent day");
+  assert(merged.dailyDay === "2026-11-20" && merged.dailyXp === 15, "merge takes today's XP from the most recent day");
+  const same = mergeStates({ ...phone, lastDay: "2026-11-20", streak: 3 }, { ...cloud, lastDay: "2026-11-20", streak: 6 });
+  assert(same.streak === 6, "same day keeps the longer streak");
+  assert(JSON.stringify(mergeStates(phone, null)) === JSON.stringify(mergeStates(phone, blankState())), "merge with no account data");
 }
 
 if (failed) {

@@ -86,6 +86,35 @@ export function normalizeState(raw) {
   };
 }
 
+// Combines progress from this phone with progress saved to an account.
+// Nothing is lost: finished lessons are kept from both, and counts take the larger value.
+export function mergeStates(localRaw, remoteRaw) {
+  const a = normalizeState(localRaw);
+  const b = normalizeState(remoteRaw);
+  const later = (x, y) => (!x ? y : !y ? x : x >= y ? x : y);
+  const done = { ...b.done };
+  for (const [key, value] of Object.entries(a.done)) if (value && !done[key]) done[key] = value;
+  const misses = { ...b.misses };
+  for (const [key, value] of Object.entries(a.misses)) misses[key] = Math.max(value || 0, misses[key] || 0);
+  const lastDay = later(a.lastDay, b.lastDay);
+  const streakFrom = a.lastDay === b.lastDay ? (a.streak >= b.streak ? a : b) : a.lastDay === lastDay ? a : b;
+  const dailyDay = later(a.dailyDay, b.dailyDay);
+  const dailyXp =
+    a.dailyDay === b.dailyDay ? Math.max(a.dailyXp, b.dailyXp) : a.dailyDay === dailyDay ? a.dailyXp : b.dailyXp;
+  return {
+    xp: Math.max(a.xp, b.xp),
+    streak: streakFrom.streak,
+    lastDay,
+    dailyDay,
+    dailyXp,
+    goalNotedDay: later(a.goalNotedDay, b.goalNotedDay),
+    done,
+    misses,
+    heartsLost: [...new Set([...a.heartsLost, ...b.heartsLost])].sort((x, y) => x - y).slice(-20),
+    installHintDismissed: a.installHintDismissed || b.installHintDismissed,
+  };
+}
+
 export function lessonKey(courseId, unitId, lessonId) {
   return `${courseId}:${unitId}:${lessonId}`;
 }

@@ -477,3 +477,34 @@ h2 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8p
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* Accounts */
+.account-line { margin-top: 18px; text-align: center; }
+.account-line .fine { margin: 0; }
+.account h2 { margin: 4px 0 8px; }
+.account p { line-height: 1.45; }
+.account .card {
+  margin-top: 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+}
+.account .card h2 { font-size: 20px; }
+.field { display: block; margin: 14px 0 12px; }
+.field span { display: block; font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.field input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 52px;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: 17px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  color: inherit;
+}
+.field input:focus { outline: none; border-color: var(--accent); }
+.stack { display: grid; gap: 10px; margin-top: 16px; }
+.banner.error { background: #f6dcd8; color: #6b1e14; }

@@ -12,6 +12,7 @@ import {
   dismissInstallHint,
   easeMiss,
   isNodeDone,
+  mergeStates,
   nodeUnlocked,
   normalizeState,
   phraseById,
@@ -22,6 +23,17 @@ import {
   tonesFromPinyin,
   visibleStreak,
 } from "./engine.js";
+import {
+  account,
+  createAccount,
+  flushPush,
+  pullProgress,
+  pushNow,
+  queuePush,
+  signIn,
+  signOutAccount,
+  startAccount,
+} from "./account.js";
 
 const STORAGE_KEY = "travel-speak-v1";
 
@@ -51,6 +63,29 @@ function save(next) {
   } catch (err) {
     saveOk = false;
   }
+  queuePush(state);
+}
+
+// After sign-in, combine this phone's progress with the account's, keep it here, and back it up.
+async function syncAfterSignIn() {
+  account.syncing = true;
+  render();
+  try {
+    const remote = await pullProgress();
+    const merged = remote ? mergeStates(state, remote) : state;
+    save(merged);
+    await pushNow(merged);
+  } catch (err) {
+    account.error = navigator.onLine ? "Couldn't reach your account. Progress is still saved on this phone." : "";
+  } finally {
+    account.syncing = false;
+    render();
+  }
+}
+
+function onAccountChange(user) {
+  if (user) syncAfterSignIn();
+  else render();
 }
 
 function esc(value) {
@@ -549,6 +584,13 @@ function showHistory(saved) {
     render();
     return;
   }
+  if (saved.name === "account") {
+    session = null;
+    view = { name: "account" };
+    resetScroll = true;
+    render();
+    return;
+  }
   if (saved.name === "lesson" && saved.phase === "done" && saved.result) {
     restoreDone(saved);
     return;
@@ -621,6 +663,11 @@ function onClick(event) {
   if (action === "course") return goCourse(el.dataset.course);
   if (action === "node") return startNode(view.courseId, el.dataset.node);
   if (action === "retry") return retryLesson();
+  if (["account", "sign-in", "create-account", "toggle-mode", "sign-out"].includes(action)) {
+    event.preventDefault();
+    accountAction(action);
+    return;
+  }
   if (action === "dismiss-install") {
     save(dismissInstallHint(state));
     render();
@@ -836,6 +883,7 @@ function render() {
   app.className = `${course ? `tone-${course.id}` : "tone-home"}${view.name === "lesson" ? " screen" : ""}`;
   let html = "";
   if (view.name === "home") html = renderHome();
+  else if (view.name === "account") html = renderAccount();
   else if (view.name === "course" || view.name === "unit") html = renderCourse(course);
   else html = renderLesson(course);
   app.innerHTML = html;
@@ -847,6 +895,8 @@ function render() {
   const title =
     view.name === "home"
       ? "Travel Speak"
+      : view.name === "account"
+        ? "Account"
       : view.name === "lesson"
         ? session?.built?.title || "Lesson"
         : course?.name || "Travel Speak";
@@ -877,6 +927,96 @@ function banner() {
   if (!saveOk) bits.push("Couldn't save on this phone. Progress may not stick if you leave.");
   if (!bits.length) return "";
   return `<p class="banner">${bits.map(esc).join(" ")}</p>`;
+}
+
+function accountLine() {
+  if (!account.enabled) return `<p class="fine">Saved on this phone only. No account.</p>`;
+  if (account.user) {
+    const note = account.syncing ? "Saving…" : `Signed in as ${account.user.username}. Progress saves to your account.`;
+    return `
+      <section class="account-line">
+        <p class="fine">${esc(note)}</p>
+        <button type="button" class="text" data-action="account">Account</button>
+      </section>`;
+  }
+  return `
+    <section class="account-line">
+      <p class="fine">Saved on this phone only.</p>
+      <button type="button" class="text" data-action="account">Sign in or create an account</button>
+    </section>`;
+}
+
+function renderAccount() {
+  const error = account.error ? `<p class="banner error" role="alert">${esc(account.error)}</p>` : "";
+  const top = topbar("Account");
+  if (account.user) {
+    const status = account.syncing ? "Saving to your account now." : "Your progress saves to your account automatically.";
+    return `
+      ${top}
+      <main class="main account">
+        ${error}
+        <p class="lede">Signed in as <strong>${esc(account.user.username)}</strong>.</p>
+        <p>${esc(status)} Sign in with the same username on another phone or computer to pick up where you left off.</p>
+        <div class="stack">
+          <button type="button" class="secondary" data-action="sign-out">Sign out</button>
+        </div>
+        <p class="fine">Signing out keeps your progress on this phone.</p>
+      </main>`;
+  }
+  const creating = account.mode === "create";
+  return `
+    ${top}
+    <main class="main account">
+      ${error}
+      <h2>${creating ? "Create an account" : "Sign in"}</h2>
+      <p class="lede">${creating ? "Pick a username and password. Your streak, XP, and lessons will save to your account." : "Sign in to save your progress and pick it up on any device."}</p>
+      <label class="field"><span>Username</span><input id="acct-user" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(account.draftUser || "")}"></label>
+      <label class="field"><span>Password</span><input id="acct-pass" type="password" autocomplete="${creating ? "new-password" : "current-password"}"></label>
+      ${creating ? `<label class="field"><span>Password again</span><input id="acct-pass2" type="password" autocomplete="new-password"></label>` : ""}
+      <button type="button" class="primary" data-action="${creating ? "create-account" : "sign-in"}" ${account.busy ? "disabled" : ""}>${account.busy ? "One moment…" : creating ? "Create account" : "Sign in"}</button>
+      <button type="button" class="text" data-action="toggle-mode">${creating ? "Have an account? Sign in" : "New here? Create an account"}</button>
+      ${creating ? `<p class="fine">There's no email, so write your password down. If you forget it, only the app's owner can reset it.</p>` : ""}
+      <p class="fine">You don't need an account. Everything keeps working on this phone without one.</p>
+    </main>`;
+}
+
+function goAccount() {
+  stopSpeech();
+  session = null;
+  view = { name: "account" };
+  writeHistory("push");
+  resetScroll = true;
+  render();
+}
+
+async function accountAction(action) {
+  const value = (id) => document.getElementById(id)?.value || "";
+  if (action === "account") return goAccount();
+  if (action === "toggle-mode") {
+    account.mode = account.mode === "create" ? "signin" : "create";
+    account.error = "";
+    account.draftUser = value("acct-user");
+    render();
+    return;
+  }
+  if (action === "sign-out") {
+    await signOutAccount();
+    render();
+    return;
+  }
+  if (!navigator.onLine) {
+    account.error = "You're offline. Try again when you're connected.";
+    render();
+    return;
+  }
+  account.draftUser = value("acct-user");
+  const password = value("acct-pass");
+  account.busy = true;
+  render();
+  if (action === "sign-in") await signIn(account.draftUser, password);
+  else if (action === "create-account") await createAccount(account.draftUser, password, value("acct-pass2"));
+  account.busy = false;
+  render();
 }
 
 function renderHome() {
@@ -913,7 +1053,7 @@ function renderHome() {
         ${COURSES.map((course) => courseCard(course)).join("")}
       </div>
       ${install}
-      <p class="fine">Saved on this phone only. No account.</p>
+      ${accountLine()}
     </main>`;
 }
 
@@ -1432,6 +1572,13 @@ function boot() {
     history.replaceState({ app: true, view: { name: "home" } }, "", screenUrl({ name: "home" }));
   }
   showHistory(history.state?.view || { name: "home" });
+  startAccount(onAccountChange);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushPush();
+  });
+  window.addEventListener("online", () => {
+    if (account.user) queuePush(state);
+  });
   if ("serviceWorker" in navigator) {
     const swUrl = new URL("sw.js", window.location.href);
     navigator.serviceWorker.register(swUrl.href).catch(() => {});

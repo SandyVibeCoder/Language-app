@@ -38,3 +38,20 @@ Phrases live in `js/courses.js` if you ever want to change a line.
 ## Privacy
 
 Nothing is sent to a server. There is no analytics. Progress is saved in the phone's own storage. Deleting the home-screen icon does not always clear it; clearing Safari website data for the site does.
+
+## Accounts (optional)
+
+People can create an account with a username and password. Progress saves to the account automatically and syncs across devices. Without a Firebase config, the app runs exactly as before and shows no sign-in button.
+
+Setup, about 10 minutes, free tier:
+
+1. Go to console.firebase.google.com and create a project. Google Analytics is not needed.
+2. **Authentication** → Get started → Sign-in method → turn on **Email/Password**. Leave "Email link" off. Save.
+3. **Firestore Database** → Create database → production mode → pick a US region.
+4. Firestore → **Rules** → paste the contents of `firestore.rules` → Publish.
+5. Project settings → General → Your apps → add a **Web** app. Copy the `firebaseConfig` object into `js/firebase-config.js`, replacing `null`.
+6. Push. "Sign in or create an account" appears on the home screen.
+
+How it works: progress still saves on the phone first, then saves to the account a moment after each change. Signing in on a new device merges both sides, so nothing is lost (finished lessons from both, the higher XP, the most recent streak).
+
+Usernames are stored in Firebase as `username@users.travel-speak.app`, an address that never receives mail. There's no email, so a forgotten password can't be reset by the user. You can reset it for them in the Firebase console under Authentication → Users.
