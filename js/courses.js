@@ -239,7 +239,7 @@ const mandarin = {
         p("g-please", "Please", "Qǐng", "請", "Put it in front of a request."),
         p("g-yes", "Yes / that's right", "Duì", "對"),
         p("g-no", "No", "Bú shì", "不是"),
-        p("g-name", "My name is…", "Wǒ jiào…", "我叫…", "Say your name after jiào. Example: Wǒ jiào Wade.", "我叫"),
+        p("g-name", "My name is…", "Wǒ jiào…", "我叫…", "Say your name after jiào. Example: Wǒ jiào Sandy.", "我叫"),
         p("g-meet", "Nice to meet you", "Hěn gāoxìng rènshi nǐ", "很高興認識你"),
         p("g-understand", "I don't understand", "Wǒ tīng bù dǒng", "我聽不懂"),
         p("g-english", "Do you speak English?", "Nǐ huì shuō Yīngwén ma?", "你會說英文嗎？"),
@@ -655,7 +655,7 @@ const japanese = {
       "Rooms are often small and non-smoking. The front desk will usually hold bags.",
       [
         p("h-book", "I have a reservation", "Yoyaku shite imasu", "予約しています"),
-        p("h-name", "The name is…", "Namae wa … desu", "名前は…です", "Example: Namae wa Wade desu.", "名前は"),
+        p("h-name", "The name is…", "Namae wa … desu", "名前は…です", "Example: Namae wa Sandy desu.", "名前は"),
         p("h-in", "Check-in, please", "Chekkuin onegaishimasu", "チェックインお願いします"),
         p("h-time", "What time is checkout?", "Chekkuauto wa nanji desu ka?", "チェックアウトは何時ですか"),
         p("h-out", "Checkout, please", "Chekkuauto onegaishimasu", "チェックアウトお願いします"),

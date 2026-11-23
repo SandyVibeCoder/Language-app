@@ -2,7 +2,7 @@
 
 Spoken phrases in Mandarin, Japanese, Spanish, and German. It is meant to live on an iPhone home screen. No account, no ads, and nothing is tracked.
 
-**Site:** https://wsarchet.github.io/Language-app/
+**Site:** https://sandyvibecoder.github.io/Language-app/
 
 ## Put it on your iPhone
 
