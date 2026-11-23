@@ -776,7 +776,8 @@ function onClick(event) {
     if (session.feedback) return;
     const step = currentStep();
     const got = session.tiles.map((tile) => tile.text);
-    grade(got.length === step.answer.length && got.every((word, index) => word === step.answer[index]));
+    const sameWord = (a, b) => a.toLocaleLowerCase("en-US") === b.toLocaleLowerCase("en-US");
+    grade(got.length === step.answer.length && got.every((word, index) => sameWord(word, step.answer[index])));
     return;
   }
   if (action === "pick") {

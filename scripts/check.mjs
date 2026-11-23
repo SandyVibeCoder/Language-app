@@ -247,8 +247,9 @@ assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(listed(esBlock).join() === esRewards.join(), "Spanish rotation order");
 assert(listed(deBlock).join() === deRewards.join(), "German rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v20"'), "service worker cache version");
+assert(sw.includes('const CACHE = "travel-speak-v21"'), "service worker cache version");
 assert(appSource.includes("session.tiles.length > 0"), "Check turns on after the first tile");
+assert(appSource.includes('toLocaleLowerCase("en-US")'), "tile answers ignore case");
 assert(appSource.includes("data-say"), "target-language text can be tapped to hear");
 assert(appSource.includes("match-col"), "matching pairs stay in two columns");
 assert(sw.includes("skipWaiting()") && sw.includes("clients.claim()"), "service worker takes over on the next load");
@@ -298,6 +299,15 @@ for (const course of COURSES) {
   assert(soundsAt > firstDone && firstDone > 0, `${course.id} sounds come after the first unit`);
   assert(path[0].kind === "lesson", `${course.id} starts with a lesson`);
   assert(nodeUnlocked(blankState(), course, 0) && !nodeUnlocked(blankState(), course, 1), `${course.id} first node only`);
+  const marked = new Set();
+  for (const unit of course.units) {
+    for (const phrase of unit.phrases) {
+      const words = phrase.roman.replace(/[…?.？。!！¿¡,]/g, "").trim().split(/\s+/).filter(Boolean);
+      for (const word of words.slice(1)) {
+        if (word.charAt(0) !== word.charAt(0).toLocaleLowerCase("en-US")) marked.add(word.toLocaleLowerCase("en-US"));
+      }
+    }
+  }
   for (const node of path) {
     if (node.kind === "sounds") continue;
     const built = buildNodeLesson(course, node, blankState(), () => 0.3);
@@ -313,6 +323,13 @@ for (const course of COURSES) {
     assert(types.has("choice") && types.has("tiles") && types.has("listen"), `${course.id}/${node.id} mix`);
     const tiles = built.steps.find((step) => step.type === "tiles");
     assert(tiles.tiles.length > tiles.answer.length, `${course.id}/${node.id} distractors`);
+    const lead = tiles.answer[0];
+    assert(lead.charAt(0) === lead.charAt(0).toLocaleUpperCase("en-US"), `${course.id}/${node.id} first tile ${lead}`);
+    for (const word of tiles.tiles) {
+      if (word === lead) continue;
+      const upper = word.charAt(0) !== word.charAt(0).toLocaleLowerCase("en-US");
+      if (upper) assert(marked.has(word.toLocaleLowerCase("en-US")), `${course.id}/${node.id} capital ${word}`);
+    }
   }
 }
 const sample = buildNodeLesson(COURSES[0], coursePath(COURSES[0])[0], blankState(), () => 0.2);

@@ -1,4 +1,4 @@
-const CACHE = "travel-speak-v20";
+const CACHE = "travel-speak-v21";
 
 const ASSETS = [
   "./",

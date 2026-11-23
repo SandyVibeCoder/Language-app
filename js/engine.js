@@ -559,6 +559,32 @@ function wordsOf(roman) {
   return parts.length ? parts : [clean || String(roman)];
 }
 
+function caseKey(word) {
+  return word.toLocaleLowerCase("en-US");
+}
+
+function setFirstLetter(word, upper) {
+  if (!word) return word;
+  const first = upper ? word.charAt(0).toLocaleUpperCase("en-US") : word.charAt(0).toLocaleLowerCase("en-US");
+  return first + word.slice(1);
+}
+
+function intrinsicCapitals(phrases) {
+  const marked = new Set();
+  for (const phrase of phrases) {
+    const words = wordsOf(phrase.roman);
+    for (const word of words.slice(1)) {
+      if (word.charAt(0) !== word.charAt(0).toLocaleLowerCase("en-US")) marked.add(caseKey(word));
+    }
+  }
+  return marked;
+}
+
+function displayTile(word, isStart, intrinsic) {
+  if (isStart || intrinsic.has(caseKey(word))) return setFirstLetter(word, true);
+  return setFirstLetter(word, false);
+}
+
 function choiceStepNew(phrase, direction, pool, rng) {
   const answerText = direction === "toRoman" ? phrase.roman : phrase.en;
   const field = direction === "toRoman" ? "roman" : "en";
@@ -599,15 +625,18 @@ function listenStep(phrase, pool, rng) {
 }
 
 function tileStep(phrase, pool, rng) {
-  const answer = wordsOf(phrase.roman);
-  const used = new Set(answer);
+  const intrinsic = intrinsicCapitals(pool);
+  const answer = wordsOf(phrase.roman).map((word, index) => displayTile(word, index === 0, intrinsic));
+  const used = new Set(answer.map(caseKey));
   const distractors = [];
   for (const other of rng.shuffle(pool)) {
     if (other.id === phrase.id) continue;
     for (const word of wordsOf(other.roman)) {
-      if (used.has(word)) continue;
-      used.add(word);
-      distractors.push(word);
+      const shown = displayTile(word, false, intrinsic);
+      const key = caseKey(shown);
+      if (used.has(key)) continue;
+      used.add(key);
+      distractors.push(shown);
       if (distractors.length === 3) break;
     }
     if (distractors.length === 3) break;
