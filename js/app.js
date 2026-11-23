@@ -1242,7 +1242,7 @@ function renderQuestion(course) {
   else if (step.type === "match") body = renderMatch(course, step);
   else body = renderChoice(course, step, note);
   const showContinue = step?.type === "slide" || session.feedback;
-  const tileReady = step?.type === "tiles" && session.tiles.length === step.answer.length;
+  const tileReady = step?.type === "tiles" && session.tiles.length > 0;
   const showCheck = step?.type === "tiles" && !session.feedback;
   const continueLabel = session.failed ? "Try again" : session.index === total - 1 ? "Finish" : "Continue";
   const continueAction = session.failed ? "retry" : "continue";
