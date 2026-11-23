@@ -1,4 +1,4 @@
-const CACHE = "travel-speak-v17";
+const CACHE = "travel-speak-v18";
 
 const ASSETS = [
   "./",
@@ -72,21 +72,37 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+function isShell(url, request) {
+  if (request.mode === "navigate") return true;
+  return url.pathname.endsWith("/index.html") || /\/js\/[^/]+\.js$/.test(url.pathname);
+}
+
+function store(request, response) {
+  if (!response || !response.ok) return response;
+  const copy = response.clone();
+  caches.open(CACHE).then((cache) => cache.put(request, copy));
+  return response;
+}
+
+function networkFirst(request) {
+  return fetch(request)
+    .then((response) => store(request, response))
+    .catch(() => caches.match(request).then((cached) => cached || caches.match("./index.html")));
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (isShell(url, request)) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
   event.respondWith(
     caches.match(request).then((cached) => {
       const fetched = fetch(request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
+        .then((response) => store(request, response))
         .catch(() => cached || caches.match("./index.html"));
       return cached || fetched;
     }),

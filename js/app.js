@@ -1026,6 +1026,8 @@ async function accountAction(action) {
     return;
   }
   if (action === "sign-out") {
+    account.mode = "signin";
+    account.error = "";
     pendingView = null;
     stopSpeech();
     session = null;
@@ -1614,6 +1616,15 @@ function boot() {
     if (account.user) queuePush(state);
   });
   if ("serviceWorker" in navigator) {
+    const reloadKey = "travel-speak-sw-reload";
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (sessionStorage.getItem(reloadKey) === "1") {
+        sessionStorage.removeItem(reloadKey);
+        return;
+      }
+      sessionStorage.setItem(reloadKey, "1");
+      window.location.reload();
+    });
     const swUrl = new URL("sw.js", window.location.href);
     navigator.serviceWorker.register(swUrl.href).catch(() => {});
   }
