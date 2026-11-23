@@ -233,11 +233,45 @@ h2 { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8p
 .tile-answer { min-height: 64px; margin: 12px 0; padding: 10px; border: 2px dashed var(--line); border-radius: 16px; align-items: center; }
 .tile, .match-cell { border: 2px solid var(--line); background: var(--card); border-radius: 14px; min-height: 48px; padding: 8px 12px; font-weight: 700; }
 .tile:disabled { visibility: hidden; }
-.match-grid { display: grid; grid-template-columns: 1fr 1fr; }
-.match-cell { text-align: left; display: flex; flex-direction: column; align-items: flex-start; }
+.match-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: start; }
+.match-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.match-cell { width: 100%; min-width: 0; overflow-wrap: anywhere; text-align: left; display: flex; flex-direction: column; align-items: flex-start; font-size: 16px; }
 .match-cell.is-on { border-color: var(--accent); background: var(--soft); }
 .match-cell.is-wrong { border-color: var(--bad); background: var(--bad-bg); }
 .match-cell.is-gone { visibility: hidden; }
+.say { cursor: pointer; }
+button.say.prompt,
+button.say.roman,
+button.say.script,
+button.say.feedback-line {
+  display: block;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.say.prompt { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.2; }
+button.say.roman { font-size: 32px; font-weight: 650; line-height: 1.2; }
+button.say.script { font-size: 16px; font-weight: 500; color: var(--muted); }
+.example button.say.roman { font-size: 26px; width: auto; display: inline; }
+.example button.say.script { width: auto; display: inline; margin-left: 6px; }
+.option.say::after,
+.tile.say::after,
+.match-cell.say::after,
+button.say.prompt::after,
+button.say.roman::after,
+button.say.script::after,
+button.say.feedback-line::after {
+  content: "🔊";
+  font-size: 0.62em;
+  margin-left: 0.35em;
+  opacity: 0.45;
+  font-weight: 500;
+}
 .option { display: flex; flex-direction: column; align-items: flex-start; }
 .feedback { border-radius: 16px; padding: 12px 14px; margin-bottom: 10px; }
 .feedback.ok { background: var(--good-bg); color: var(--good); }

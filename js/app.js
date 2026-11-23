@@ -142,6 +142,18 @@ function findPhrase(course, phraseId) {
   return null;
 }
 
+function hearable(course, say, className, inner) {
+  if (!say) return `<span class="${className}">${inner}</span>`;
+  return `<button type="button" class="say ${className}" data-say="${esc(say)}">${inner}</button>`;
+}
+
+function scriptLine(course, phrase, say) {
+  if (!phrase?.script) return "";
+  const inner = esc(phrase.script);
+  if (scriptLang(course) === "en") return `<p class="script" lang="en">${inner}</p>`;
+  return hearable(course, say || phrase.script, "script", inner);
+}
+
 let toneGen = 0;
 let toneNodes = [];
 let toneMasters = [];
@@ -313,6 +325,13 @@ function playToneContours(tones, onstart) {
   });
 }
 
+function speakNow(text, lang) {
+  if (!text || !lang) return;
+  voiceToken += 1;
+  stopTones();
+  speak(text, lang);
+}
+
 function playLine(text, lang, toneRoman, slow) {
   const token = ++voiceToken;
   stopTones();
@@ -385,8 +404,8 @@ function paintAudio() {
         anchor.insertAdjacentHTML(
           "afterend",
           `<div class="fallback">
-            <p class="roman">${esc(phrase.roman)}</p>
-            <p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>
+            ${hearable(course, speakText(phrase), "roman", esc(phrase.roman))}
+            ${scriptLine(course, phrase, speakText(phrase))}
             <p class="hint">No voice on this phone. Use the ${esc(course.romanName.toLowerCase())} and pick the meaning.</p>
           </div>`,
         );
@@ -409,6 +428,13 @@ function currentNode() {
   const course = currentCourse();
   if (!course || !view.lessonId) return null;
   return coursePath(course).find((node) => node.id === view.lessonId) || null;
+}
+
+function feedbackSpeech(course, step) {
+  if (!step || step.type === "match" || step.type === "listen") return "";
+  if (step.type === "choice" && step.direction !== "toRoman") return "";
+  const phrase = step.phraseId ? findPhrase(course, step.phraseId) : null;
+  return phrase ? speakText(phrase) : "";
 }
 
 function answerLine(course, step) {
@@ -437,7 +463,8 @@ function spendHeart() {
 function grade(ok) {
   const step = currentStep();
   const course = currentCourse();
-  session.feedback = { ok, line: answerLine(course, step) };
+  const say = feedbackSpeech(course, step);
+  session.feedback = { ok, line: answerLine(course, step), say };
   if (step.phraseId) save(ok ? easeMiss(state, session.courseId, step.phraseId) : recordMiss(state, session.courseId, step.phraseId));
   if (!ok) {
     session.wrongs += 1;
@@ -456,6 +483,7 @@ function advance() {
   session.matched = [];
   session.matchMissed = false;
   session.matchOrder = null;
+  session.matchCols = null;
   session.pickedOption = null;
   session.voice = "idle";
   session.index += 1;
@@ -685,6 +713,12 @@ function currentStep() {
 }
 
 function onClick(event) {
+  if (!root().contains(event.target)) return;
+  const sayEl = event.target.closest("[data-say]");
+  if (sayEl && sayEl.dataset.say) {
+    const course = currentCourse();
+    if (course) speakNow(sayEl.dataset.say, course.voice);
+  }
   const el = event.target.closest("[data-action]");
   if (!el || !root().contains(el)) return;
   const action = el.dataset.action;
@@ -1190,7 +1224,10 @@ function lessonProgress(doneCount, total) {
 function feedbackBlock() {
   if (!session.feedback) return "";
   const ok = session.feedback.ok;
-  return `<div class="feedback ${ok ? "ok" : "bad"}" role="status"><strong>${ok ? "Nice." : "Not quite."}</strong><p>${esc(session.feedback.line)}</p></div>`;
+  const line = session.feedback.say
+    ? hearable(currentCourse(), session.feedback.say, "feedback-line", esc(session.feedback.line))
+    : `<p>${esc(session.feedback.line)}</p>`;
+  return `<div class="feedback ${ok ? "ok" : "bad"}" role="status"><strong>${ok ? "Nice." : "Not quite."}</strong>${line}</div>`;
 }
 
 function renderQuestion(course) {
@@ -1232,8 +1269,8 @@ function renderSlide(course, step, note) {
       (example, index) => `
       <figure class="example">
         <figcaption>
-          <span class="roman">${esc(example.roman)}</span>
-          <span class="script" lang="${scriptLang(course)}">${esc(example.script)}</span>
+          ${hearable(course, example.speak || (scriptLang(course) === "en" ? example.roman : example.script || example.roman), "roman", esc(example.roman))}
+          ${scriptLang(course) === "en" ? `<span class="script" lang="en">${esc(example.script || "")}</span>` : hearable(course, example.script || example.roman, "script", esc(example.script || ""))}
         </figcaption>
         <p>${esc(example.gloss || "")}</p>
         <button type="button" class="secondary slim" data-action="example" data-index="${index}">Hear it</button>
@@ -1257,17 +1294,29 @@ function optionClass(step, id) {
 }
 
 function renderChoice(course, step, note) {
+  const phrase = step.phraseId ? findPhrase(course, step.phraseId) : null;
   const options = step.options
     .map((option) => {
-      const script = step.direction === "toRoman" && option.script ? `<small class="script">${esc(option.script)}</small>` : "";
-      return `<button type="button" class="${optionClass(step, option.id)}" data-action="pick" data-option="${esc(option.id)}" ${session.feedback ? "disabled" : ""}><span>${esc(option.text)}</span>${script}</button>`;
+      const optionPhrase = findPhrase(course, option.id);
+      const say = optionPhrase ? speakText(optionPhrase) : "";
+      const script = step.direction === "toRoman" && option.script && scriptLang(course) !== "en" ? `<small class="script">${esc(option.script)}</small>` : "";
+      const sayAttr = say ? ` data-say="${esc(say)}"` : "";
+      return `<button type="button" class="${optionClass(step, option.id)}${say ? " say" : ""}" data-action="pick" data-option="${esc(option.id)}"${sayAttr}><span>${esc(option.text)}</span>${script}</button>`;
     })
     .join("");
-  const spoken = step.direction === "toEn";
+  const targetPrompt = step.direction === "toEn" && phrase ? speakText(phrase) : "";
+  const prompt = targetPrompt
+    ? hearable(course, targetPrompt, "prompt roman", esc(step.prompt))
+    : `<p class="prompt">${esc(step.prompt)}</p>`;
+  const guide = step.promptScript
+    ? scriptLang(course) === "en"
+      ? `<p class="script" lang="en">${esc(step.promptScript)}</p>`
+      : hearable(course, targetPrompt || step.promptScript, "script", esc(step.promptScript))
+    : "";
   return `
     <p class="prompt-label">${esc(step.promptLabel || "")}</p>
-    <p class="${spoken ? "prompt roman" : "prompt"}">${esc(step.prompt)}</p>
-    ${step.promptScript ? `<p class="script" lang="${scriptLang(course)}">${esc(step.promptScript)}</p>` : ""}
+    ${prompt}
+    ${guide}
     ${note && session.unitId === "sounds" ? `<p class="hint">${esc(note)}</p>` : ""}
     ${step.speak ? `<button type="button" class="secondary slim" data-action="play">${esc(step.speak.label || "Hear it")}</button>` : ""}
     <div class="options">${options}</div>`;
@@ -1277,12 +1326,12 @@ function renderListen(course, step) {
   const options = step.options
     .map(
       (option) =>
-        `<button type="button" class="${optionClass(step, option.id)}" data-action="pick" data-option="${esc(option.id)}" ${session.feedback ? "disabled" : ""}>${esc(option.text)}</button>`,
+        `<button type="button" class="${optionClass(step, option.id)}" data-action="pick" data-option="${esc(option.id)}">${esc(option.text)}</button>`,
     )
     .join("");
   const phrase = session.feedback ? findPhrase(course, step.phraseId) : null;
   const shown = phrase
-    ? `<p class="roman">${esc(phrase.roman)}</p><p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>`
+    ? `${hearable(course, speakText(phrase), "roman", esc(phrase.roman))}${scriptLine(course, phrase, speakText(phrase))}`
     : "";
   return `
     <p class="prompt-label">${esc(step.promptLabel || "What did you hear?")}</p>
@@ -1300,13 +1349,13 @@ function renderTiles(course, step) {
   const chosen = session.tiles
     .map(
       (tile) =>
-        `<button type="button" class="tile" data-action="tile" data-key="${esc(tile.key)}" data-text="${esc(tile.text)}">${esc(tile.text)}</button>`,
+        `<button type="button" class="tile say" data-action="tile" data-key="${esc(tile.key)}" data-text="${esc(tile.text)}" data-say="${esc(tile.text)}">${esc(tile.text)}</button>`,
     )
     .join("");
   const bank = step.tiles
     .map((word, index) => {
       const used = session.tiles.some((tile) => tile.key === String(index));
-      return `<button type="button" class="tile" data-action="tile" data-key="${index}" data-text="${esc(word)}" ${used || session.feedback ? "disabled" : ""}>${esc(word)}</button>`;
+      return `<button type="button" class="tile say" data-action="tile" data-key="${index}" data-text="${esc(word)}" data-say="${esc(word)}" ${used ? "disabled" : ""}>${esc(word)}</button>`;
     })
     .join("");
   return `
@@ -1314,39 +1363,56 @@ function renderTiles(course, step) {
     <p class="prompt">${esc(step.prompt)}</p>
     <div class="tile-answer">${chosen || `<span class="hint">Tap the words below, in order.</span>`}</div>
     <div class="tile-bank">${bank}</div>
-    ${phrase && session.feedback ? `<p class="script" lang="${scriptLang(course)}">${esc(phrase.script)}</p>` : ""}`;
+    ${phrase && session.feedback ? scriptLine(course, phrase, speakText(phrase)) : ""}`;
 }
 
-function matchOrder(step) {
-  if (session.matchOrder && session.matchOrderFor === session.index) return session.matchOrder;
-  const items = [];
-  step.pairs.forEach((pair) => {
-    items.push({ side: "roman", id: pair.id, text: pair.roman, script: pair.script });
-    items.push({ side: "en", id: pair.id, text: pair.en, script: "" });
-  });
-  for (let i = items.length - 1; i > 0; i -= 1) {
+function shuffleItems(items) {
+  const copy = items.slice();
+  for (let i = copy.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
-    [items[i], items[j]] = [items[j], items[i]];
+    [copy[i], copy[j]] = [copy[j], copy[i]];
   }
-  session.matchOrder = items;
+  return copy;
+}
+
+function matchColumns(course, step) {
+  if (session.matchCols && session.matchOrderFor === session.index) return session.matchCols;
+  const left = [];
+  const right = [];
+  step.pairs.forEach((pair) => {
+    const phrase = findPhrase(course, pair.id);
+    left.push({
+      side: "roman",
+      id: pair.id,
+      text: pair.roman,
+      script: scriptLang(course) === "en" ? "" : pair.script,
+      say: phrase ? speakText(phrase) : pair.roman,
+    });
+    right.push({ side: "en", id: pair.id, text: pair.en });
+  });
+  session.matchCols = { left: shuffleItems(left), right: shuffleItems(right) };
   session.matchOrderFor = session.index;
-  return items;
+  return session.matchCols;
+}
+
+function matchCell(item) {
+  const gone = session.matched.includes(item.id);
+  const selected = session.matchSel && session.matchSel.side === item.side && session.matchSel.id === item.id;
+  const bad = session.badPair && session.badPair.includes(item.id);
+  const cls = `match-cell${item.say ? " say" : ""}${gone ? " is-gone" : ""}${selected ? " is-on" : ""}${bad ? " is-wrong" : ""}`;
+  const script = item.script ? `<small class="script">${esc(item.script)}</small>` : "";
+  const say = item.say ? ` data-say="${esc(item.say)}"` : "";
+  return `<button type="button" class="${cls}" data-action="pair" data-pair="${item.side}:${esc(item.id)}"${say}${gone ? " disabled" : ""}><span>${esc(item.text)}</span>${script}</button>`;
 }
 
 function renderMatch(course, step) {
-  const cells = matchOrder(step)
-    .map((item) => {
-      const gone = session.matched.includes(item.id);
-      const selected = session.matchSel && session.matchSel.side === item.side && session.matchSel.id === item.id;
-      const bad = session.badPair && session.badPair.includes(item.id);
-      const cls = `match-cell${gone ? " is-gone" : ""}${selected ? " is-on" : ""}${bad ? " is-wrong" : ""}`;
-      const script = item.script ? `<small class="script">${esc(item.script)}</small>` : "";
-      return `<button type="button" class="${cls}" data-action="pair" data-pair="${item.side}:${esc(item.id)}" ${gone || session.feedback ? "disabled" : ""}><span>${esc(item.text)}</span>${script}</button>`;
-    })
-    .join("");
+  const columns = matchColumns(course, step);
   return `
     <p class="prompt-label">${esc(step.promptLabel)}</p>
-    <div class="match-grid">${cells}</div>`;
+    <div class="match-grid">
+      <div class="match-col">${columns.left.map(matchCell).join("")}</div>
+      <div class="match-col">${columns.right.map(matchCell).join("")}</div>
+    </div>`;
 }
 
 function renderDone(course) {
