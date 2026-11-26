@@ -542,3 +542,60 @@ button.say.feedback-line::after {
 .field input:focus { outline: none; border-color: var(--accent); }
 .stack { display: grid; gap: 10px; margin-top: 16px; }
 .banner.error { background: #f6dcd8; color: #6b1e14; }
+
+/* Choice: pick first, then Check. */
+.option.is-on { border-color: var(--accent); background: var(--soft); box-shadow: 0 0 0 2px var(--accent) inset; }
+
+/* Feedback extras */
+.combo { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 99px; background: var(--good); color: #fff; font-size: 13px; vertical-align: 2px; }
+.feedback-note { font-size: 15px; font-weight: 600; }
+
+/* Typing */
+.type-field input { font-size: 22px; min-height: 56px; }
+.type-field input:disabled { color: var(--ink); background: var(--card); opacity: 1; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Speaking */
+.mic { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 22px auto 8px; padding: 0; border: 0; background: none; color: var(--accent); font-weight: 700; font-size: 16px; }
+.mic svg { width: 84px; height: 84px; padding: 18px; border-radius: 50%; background: var(--card); border: 3px solid var(--line); box-shadow: 0 6px 0 var(--line); }
+.mic.is-on svg { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); animation: mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--accent) 22%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .mic.is-on svg { animation: none; } }
+.speak-msg { text-align: center; }
+.lesson .text[data-action="skip-speak"] { display: block; margin: 6px auto 0; }
+
+/* Quit confirmation */
+.modal-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(29, 25, 20, 0.45); display: flex; align-items: flex-end; justify-content: center; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+.modal { width: 100%; max-width: 480px; background: var(--card); border-radius: 22px; padding: 22px 20px 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
+.modal h2 { margin: 0; font-size: 22px; }
+.modal p { margin: 0 0 8px; color: var(--muted); }
+.text.danger { color: var(--bad); }
+.lesson-bar .spacer { visibility: hidden; }
+
+/* End-of-lesson summary */
+.summary-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 18px 0 8px; }
+.summary-stats .stat { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 10px 6px; text-align: center; }
+.summary-stats .stat strong { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+.to-practice { margin-top: 14px; }
+.to-practice h3 { margin: 0; font-size: 18px; }
+.to-practice .fine { text-align: left; margin: 2px 0 8px; }
+.to-practice ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.to-practice li { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 8px 12px; }
+.to-practice .roman { font-size: 20px; text-align: left; }
+.to-practice li span { color: var(--muted); font-size: 15px; }
+
+/* Spaced review */
+.review-card { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; margin: 0 0 14px; padding: 14px 16px; border: 2px solid var(--accent); border-radius: 18px; background: var(--soft); color: var(--ink); text-align: left; }
+.review-card strong { font-size: 18px; color: var(--accent); }
+.review-card span { font-size: 15px; color: var(--muted); }
+.path-node.cracked { background: #c9893a; box-shadow: 0 8px 0 #9b6526; color: #fffaf4; background-image: linear-gradient(135deg, transparent 46%, rgba(255, 250, 244, 0.55) 47%, rgba(255, 250, 244, 0.55) 51%, transparent 52%); }
+.crack-note { margin: 6px 0 0 !important; font-size: 14px; font-weight: 700; color: #9b6526 !important; }
+
+/* Jump ahead */
+.jump-btn { margin-top: 10px; min-height: 44px; padding: 8px 14px; border-radius: 12px; border: 2px solid var(--line); background: var(--bg); color: var(--accent); font-weight: 700; font-size: 15px; }
+
+/* Settings on the account screen */
+.settings { margin: 18px 0; }
+.settings h2 { font-size: 18px; margin: 0 0 8px; }
+.setting { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 52px; margin-bottom: 8px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); font-size: 17px; }
+.setting strong { color: var(--accent); }

@@ -3,16 +3,28 @@ import { COURSES } from "./courses.js";
 
 export const DAILY_GOAL = 20;
 
+// Every XP amount lives here, so the app and the checks can't drift apart.
 export const LESSON_XP = {
-  sounds: 8,
-  learn: 10,
-  practice: 12,
-  listen: 12,
-  review: 8,
   lesson: 15,
   checkpoint: 12,
-  heart: 5,
+  sounds: 8,
+  refresh: 10,
+  jump: 20,
+  replay: 5,
+  perfect: 5,
+  combo5: 2,
+  combo10: 2,
 };
+
+export function baseXpFor(kind) {
+  return LESSON_XP[kind] ?? LESSON_XP.lesson;
+}
+
+export function bonusXp({ perfect, bestCombo }) {
+  const perfectBonus = perfect ? LESSON_XP.perfect : 0;
+  const comboBonus = (bestCombo >= 5 ? LESSON_XP.combo5 : 0) + (bestCombo >= 10 ? LESSON_XP.combo10 : 0);
+  return { perfectBonus, comboBonus };
+}
 
 export const CORE_LESSONS = ["learn", "practice", "listen"];
 
@@ -50,6 +62,7 @@ export function blankState() {
     goalNotedDay: null,
     done: {},
     misses: {},
+    srs: {},
     heartsLost: [],
     installHintDismissed: false,
   };
@@ -81,6 +94,7 @@ export function normalizeState(raw) {
     goalNotedDay: typeof raw.goalNotedDay === "string" ? raw.goalNotedDay : null,
     done: migrateDone(raw.done && typeof raw.done === "object" ? { ...raw.done } : {}),
     misses: raw.misses && typeof raw.misses === "object" ? { ...raw.misses } : {},
+    srs: cleanSrs(raw.srs),
     heartsLost: Array.isArray(raw.heartsLost) ? raw.heartsLost.filter((t) => Number.isFinite(t)) : [],
     installHintDismissed: Boolean(raw.installHintDismissed),
   };
@@ -101,6 +115,10 @@ export function mergeStates(localRaw, remoteRaw) {
   const dailyDay = later(a.dailyDay, b.dailyDay);
   const dailyXp =
     a.dailyDay === b.dailyDay ? Math.max(a.dailyXp, b.dailyXp) : a.dailyDay === dailyDay ? a.dailyXp : b.dailyXp;
+  const srs = { ...b.srs };
+  for (const [key, value] of Object.entries(a.srs)) {
+    if (!srs[key] || (value.t || 0) > (srs[key].t || 0)) srs[key] = value;
+  }
   return {
     xp: Math.max(a.xp, b.xp),
     streak: streakFrom.streak,
@@ -110,6 +128,7 @@ export function mergeStates(localRaw, remoteRaw) {
     goalNotedDay: later(a.goalNotedDay, b.goalNotedDay),
     done,
     misses,
+    srs,
     heartsLost: [...new Set([...a.heartsLost, ...b.heartsLost])].sort((x, y) => x - y).slice(-20),
     installHintDismissed: a.installHintDismissed || b.installHintDismissed,
   };
@@ -160,6 +179,7 @@ function clone(state) {
     ...state,
     done: { ...state.done },
     misses: { ...state.misses },
+    srs: { ...(state.srs || {}) },
     heartsLost: [...(state.heartsLost || [])],
   };
 }
@@ -184,23 +204,25 @@ export function missCountForUnit(state, courseId, unit) {
   return unit.phrases.filter((phrase) => (state.misses[missKey(courseId, phrase.id)] || 0) > 0).length;
 }
 
-// Awards XP only the first time a lesson is finished. Repeats still count for the streak.
-export function completeLesson(state, { courseId, unitId, lessonId, xp, today }) {
+// Full XP the first time a lesson is finished, a smaller amount for replays,
+// plus bonuses for no mistakes and for answers in a row. Practice (mark: false)
+// earns its XP without marking a path lesson done. Every finish counts for the streak.
+export function completeLesson(state, { courseId, unitId, lessonId, xp, today, perfect = false, bestCombo = 0, mark = true }) {
   const next = clone(state);
   const key = lessonKey(courseId, unitId, lessonId);
-  const first = !next.done[key];
-  next.done[key] = next.done[key] || today;
+  const first = mark ? !next.done[key] : true;
+  if (mark) next.done[key] = next.done[key] || today;
 
-  let awarded = 0;
-  if (first) {
-    awarded = xp;
-    next.xp += xp;
-    if (next.dailyDay !== today) {
-      next.dailyDay = today;
-      next.dailyXp = 0;
-    }
-    next.dailyXp += xp;
+  const base = first ? xp : LESSON_XP.replay;
+  const { perfectBonus, comboBonus } = bonusXp({ perfect, bestCombo });
+  const awarded = base + perfectBonus + comboBonus;
+  if (next.dailyDay !== today) {
+    next.dailyDay = today;
+    next.dailyXp = 0;
   }
+  const before = next.dailyXp;
+  next.xp += awarded;
+  next.dailyXp += awarded;
 
   let streakNote = null;
   if (next.lastDay !== today) {
@@ -210,11 +232,10 @@ export function completeLesson(state, { courseId, unitId, lessonId, xp, today })
     streakNote = next.streak;
   }
 
-  const before = first ? next.dailyXp - awarded : dailyXp(next, today);
-  const goalJustMet = first && before < DAILY_GOAL && next.dailyXp >= DAILY_GOAL;
-  if (next.dailyDay === today && next.dailyXp >= DAILY_GOAL) next.goalNotedDay = today;
+  const goalJustMet = before < DAILY_GOAL && next.dailyXp >= DAILY_GOAL;
+  if (next.dailyXp >= DAILY_GOAL) next.goalNotedDay = today;
 
-  return { state: next, awarded, streakNote, goalJustMet, first };
+  return { state: next, awarded, base, perfectBonus, comboBonus, streakNote, goalJustMet, first };
 }
 
 export function dismissInstallHint(state) {
@@ -459,8 +480,8 @@ export function speechForTone(tone) {
 }
 
 export const MAX_HEARTS = 5;
-export const LESSON_LIMIT = 10;
-const BASE_QUESTIONS = 7;
+export const LESSON_LIMIT = 11;
+const BASE_QUESTIONS = 8;
 
 const CHUNK = 5;
 
@@ -567,7 +588,7 @@ function dedupePhrases(list) {
   return out;
 }
 
-function wordsOf(roman) {
+export function wordsOf(roman) {
   const clean = String(roman || "").replace(/[…?.？。!！¿¡,]/g, "").trim();
   const parts = clean.split(/\s+/).filter(Boolean);
   return parts.length ? parts : [clean || String(roman)];
@@ -705,19 +726,64 @@ function matchStep(phrases) {
   };
 }
 
-function buildMix(title, fresh, pool, rng, focus) {
+// Typing and speaking only use whole phrases, not patterns like "Wǒ jiào…".
+export function canProduce(phrase) {
+  return Boolean(phrase?.roman) && !/[…/()]/.test(phrase.roman);
+}
+
+function typeStep(phrase) {
+  return {
+    type: "type",
+    phraseId: phrase.id,
+    promptLabel: "Type what you hear",
+    answer: phrase.roman,
+  };
+}
+
+function speakStep(phrase) {
+  return {
+    type: "speak",
+    phraseId: phrase.id,
+    promptLabel: "Say this out loud",
+    prompt: phrase.roman,
+  };
+}
+
+// Picks a phrase that can be typed or spoken, starting at index, else falls back.
+function producible(order, start) {
+  for (let i = 0; i < order.length; i += 1) {
+    const phrase = order[(start + i) % order.length];
+    if (canProduce(phrase)) return phrase;
+  }
+  return null;
+}
+
+function buildMix(title, fresh, pool, rng, focus, opts = {}) {
   const order = dedupePhrases([...fresh, ...rng.shuffle(pool)]);
   const at = (index) => order[index % order.length];
+  const speakOk = opts.speak !== false;
+  const typed = (index) => {
+    const phrase = producible(order, index);
+    return phrase ? typeStep(phrase) : choiceStepNew(at(index), "toRoman", pool, rng);
+  };
+  const spoken = (index) => {
+    const phrase = speakOk ? producible(order, index) : null;
+    if (!phrase) return choiceStepNew(at(index), "toRoman", pool, rng);
+    // If speaking gets switched off mid-lesson, this question takes its place.
+    return { ...speakStep(phrase), fallback: choiceStepNew(phrase, "toRoman", pool, rng) };
+  };
+  const pairs = () => matchStep(rng.shuffle(pool).slice(0, Math.min(5, pool.length)));
   if (focus === "listen") {
     // Listening courses (eavesdropping, following a song) hear more and build less.
     const heard = [
       listenStep(at(0), pool, rng),
       choiceStepNew(at(1), "toEn", pool, rng),
       listenStep(at(2), pool, rng),
-      listenStep(at(3), pool, rng),
-      choiceStepNew(at(4), "toEn", pool, rng),
+      typed(3),
+      listenStep(at(4), pool, rng),
+      spoken(0),
       listenStep(at(1), pool, rng),
-      matchStep(rng.shuffle(pool).slice(0, Math.min(5, pool.length))),
+      pairs(),
     ];
     return { kind: "mix", title, steps: heard.slice(0, BASE_QUESTIONS) };
   }
@@ -726,45 +792,290 @@ function buildMix(title, fresh, pool, rng, focus) {
     choiceStepNew(at(1), "toEn", pool, rng),
     listenStep(at(2), pool, rng),
     tileStep(at(3), pool, rng),
-    choiceStepNew(at(4), "toRoman", pool, rng),
-    listenStep(at(0), pool, rng),
-    matchStep(rng.shuffle(pool).slice(0, Math.min(5, pool.length))),
+    typed(4),
+    spoken(0),
+    listenStep(at(1), pool, rng),
+    pairs(),
   ];
   return { kind: "mix", title, steps: steps.slice(0, BASE_QUESTIONS) };
 }
 
-export function buildNodeLesson(course, node, state, random = Math.random) {
+function weakFirst(state, course, phrases) {
+  return phrases
+    .filter((phrase) => (state.misses[missKey(course.id, phrase.id)] || 0) > 0)
+    .sort(
+      (a, b) =>
+        (state.misses[missKey(course.id, b.id)] || 0) - (state.misses[missKey(course.id, a.id)] || 0),
+    );
+}
+
+export function buildNodeLesson(course, node, state, random = Math.random, opts = {}) {
   if (node.kind === "sounds") return buildSoundsLesson(course, random);
   const rng = makeRng(random);
+  const today = opts.today || dayKey();
   const all = course.units.flatMap((unit) => unit.phrases);
   const byId = new Map(all.map((phrase) => [phrase.id, phrase]));
   const path = coursePath(course);
   const index = path.findIndex((item) => item.unitId === node.unitId && item.id === node.id);
   const earlierIds = new Set(path.slice(0, Math.max(0, index)).flatMap((item) => item.phraseIds || []));
   const earlier = all.filter((phrase) => earlierIds.has(phrase.id));
-  const weak = earlier
-    .filter((phrase) => (state.misses[missKey(course.id, phrase.id)] || 0) > 0)
-    .sort(
-      (a, b) =>
-        (state.misses[missKey(course.id, b.id)] || 0) - (state.misses[missKey(course.id, a.id)] || 0),
-    );
+  const weak = weakFirst(state, course, earlier);
+  const due = duePhrases(state, course, earlier, today);
   let fresh = [];
   let pool = [];
   if (node.kind === "checkpoint") {
     const unit = course.units.find((item) => item.id === node.unitId);
+    const inUnit = (phrase) => unit.phrases.some((item) => item.id === phrase.id);
     pool = dedupePhrases([
-      ...weak.filter((phrase) => unit.phrases.some((item) => item.id === phrase.id)),
+      ...weak.filter(inUnit),
+      ...due.filter(inUnit),
       ...rng.shuffle(unit.phrases),
       ...weak,
+      ...due,
       ...rng.shuffle(earlier),
     ]).slice(0, 10);
   } else {
     fresh = node.phraseIds.map((id) => byId.get(id)).filter(Boolean);
-    const review = dedupePhrases([...weak, ...rng.shuffle(earlier)])
+    const review = dedupePhrases([...weak, ...due, ...rng.shuffle(earlier)])
       .filter((phrase) => !node.phraseIds.includes(phrase.id))
       .slice(0, 5);
     pool = dedupePhrases([...fresh, ...review]);
   }
   if (pool.length < 5) pool = dedupePhrases([...pool, ...rng.shuffle(all)]).slice(0, 5);
-  return buildMix(node.title, fresh, pool, rng, course.focus);
+  return buildMix(node.title, fresh, pool, rng, course.focus, opts);
+}
+
+// ---------- Spaced review ----------
+// Each phrase you've met has a box. A right answer on a due phrase moves it up a box
+// and pushes the next review further out. A miss drops it to box 0, due today.
+export const REVIEW_DAYS = [0, 1, 3, 7, 16, 35, 90];
+
+function cleanSrs(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!value || typeof value !== "object") continue;
+    if (!Number.isFinite(value.b) || typeof value.d !== "string") continue;
+    out[key] = { b: Math.max(0, Math.min(REVIEW_DAYS.length - 1, value.b)), d: value.d, t: Number.isFinite(value.t) ? value.t : 0 };
+  }
+  return out;
+}
+
+export function addDays(key, days) {
+  const [y, m, d] = key.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() + days);
+  return dayKey(date);
+}
+
+export function reviewPhrase(state, courseId, phraseId, ok, today = dayKey(), now = Date.now()) {
+  const key = missKey(courseId, phraseId);
+  const current = state.srs?.[key];
+  if (ok && current && current.d > today) return state;
+  const next = clone(state);
+  if (!ok) {
+    next.srs[key] = { b: 0, d: today, t: now };
+    return next;
+  }
+  const box = Math.min(REVIEW_DAYS.length - 1, current ? current.b + 1 : 1);
+  next.srs[key] = { b: box, d: addDays(today, REVIEW_DAYS[box]), t: now };
+  return next;
+}
+
+// Phrases met in a finished lesson (or skipped past with a jump) start in box 1.
+export function seedPhrases(state, courseId, phraseIds, today = dayKey(), spread = false, now = Date.now()) {
+  const next = clone(state);
+  phraseIds.forEach((id, index) => {
+    const key = missKey(courseId, id);
+    if (next.srs[key]) return;
+    next.srs[key] = { b: 1, d: addDays(today, spread ? 1 + (index % 3) : 1), t: now };
+  });
+  return next;
+}
+
+export function isDue(state, courseId, phraseId, today = dayKey()) {
+  const entry = state.srs?.[missKey(courseId, phraseId)];
+  return Boolean(entry && entry.d <= today);
+}
+
+export function duePhrases(state, course, phrases, today = dayKey()) {
+  return phrases
+    .filter((phrase) => isDue(state, course.id, phrase.id, today))
+    .sort((a, b) => {
+      const x = state.srs[missKey(course.id, a.id)];
+      const y = state.srs[missKey(course.id, b.id)];
+      return x.d === y.d ? x.b - y.b : x.d < y.d ? -1 : 1;
+    });
+}
+
+export function courseDue(state, course, today = dayKey()) {
+  return duePhrases(state, course, course.units.flatMap((unit) => unit.phrases), today);
+}
+
+// A finished unit "cracks" when a good share of its phrases are due again.
+export function unitCracked(state, course, unit, today = dayKey()) {
+  if (!unitCoreComplete(state, course.id, unit.id)) return false;
+  const seen = unit.phrases.filter((phrase) => state.srs?.[missKey(course.id, phrase.id)]);
+  if (!seen.length) return false;
+  const due = seen.filter((phrase) => isDue(state, course.id, phrase.id, today)).length;
+  return due >= 3 && due >= Math.ceil(seen.length * 0.4);
+}
+
+export function buildRefreshLesson(course, unitId, state, random = Math.random, opts = {}) {
+  const rng = makeRng(random);
+  const today = opts.today || dayKey();
+  const unit = unitId ? course.units.find((item) => item.id === unitId) : null;
+  const scope = unit ? unit.phrases : course.units.flatMap((item) => item.phrases);
+  const seen = scope.filter((phrase) => state.srs?.[missKey(course.id, phrase.id)]);
+  const due = duePhrases(state, course, scope, today);
+  let pool = dedupePhrases([...due, ...weakFirst(state, course, seen), ...rng.shuffle(seen)]).slice(0, 8);
+  if (pool.length < 5) pool = dedupePhrases([...pool, ...rng.shuffle(unit ? unit.phrases : scope)]).slice(0, 5);
+  const fresh = due.slice(0, 5);
+  const title = unit ? `Refresh: ${unit.title}` : "Review";
+  return buildMix(title, fresh, pool, rng, course.focus, opts);
+}
+
+// ---------- Jump ahead ----------
+export const JUMP_HEARTS = 3;
+const JUMP_QUESTIONS = 10;
+
+export function buildJumpTest(course, unitIndex, random = Math.random, opts = {}) {
+  const rng = makeRng(random);
+  const before = course.units.slice(0, unitIndex);
+  const recent = before.at(-1)?.phrases || [];
+  const older = before.slice(0, -1).flatMap((unit) => unit.phrases);
+  const pool = dedupePhrases([...rng.shuffle(recent).slice(0, 6), ...rng.shuffle(older), ...rng.shuffle(recent)]);
+  const order = pool.slice(0, JUMP_QUESTIONS);
+  const at = (index) => order[index % order.length];
+  const steps = [];
+  const kinds = course.focus === "listen"
+    ? ["listen", "toEn", "type", "listen", "toEn", "listen", "type", "toEn", "listen", "match"]
+    : ["toRoman", "toEn", "listen", "tiles", "type", "toRoman", "listen", "toEn", "type", "match"];
+  kinds.forEach((kind, index) => {
+    const phrase = at(index);
+    if (kind === "listen") steps.push(listenStep(phrase, pool, rng));
+    else if (kind === "toEn" || kind === "toRoman") steps.push(choiceStepNew(phrase, kind, pool, rng));
+    else if (kind === "tiles") steps.push(tileStep(phrase, pool, rng));
+    else if (kind === "match") steps.push(matchStep(rng.shuffle(pool).slice(0, 5)));
+    else {
+      const typed = producible(order, index);
+      steps.push(typed ? typeStep(typed) : choiceStepNew(phrase, "toRoman", pool, rng));
+    }
+  });
+  const target = course.units[unitIndex];
+  return { kind: "mix", title: `Jump to ${target.title}`, steps };
+}
+
+// Passing the test marks everything before that unit done and queues those phrases for review.
+export function applyJump(state, course, unitIndex, today = dayKey()) {
+  let next = clone(state);
+  const path = coursePath(course);
+  const unitIds = new Set(course.units.slice(0, unitIndex).map((unit) => unit.id));
+  for (const node of path) {
+    if (!unitIds.has(node.unitId) && !(node.kind === "sounds" && unitIndex > 0)) continue;
+    const key = node.kind === "sounds" ? lessonKey(course.id, "sounds", "sounds") : lessonKey(course.id, node.unitId, node.id);
+    next.done[key] = next.done[key] || today;
+  }
+  const ids = course.units.slice(0, unitIndex).flatMap((unit) => unit.phrases.map((phrase) => phrase.id));
+  next = seedPhrases(next, course.id, ids, today, true);
+  return next;
+}
+
+// ---------- Typed answers ----------
+export function levenshtein(a, b) {
+  const x = [...a];
+  const y = [...b];
+  let prev = Array.from({ length: y.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= x.length; i += 1) {
+    const cur = [i];
+    for (let j = 1; j <= y.length; j += 1) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[y.length];
+}
+
+// Accents, tone marks, macrons, capitals, and punctuation are optional when typing.
+export function normalizeTyped(text, compact = false) {
+  const plain = String(text || "")
+    .replace(/ß/g, "ss")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[’'`´]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return compact ? plain.replace(/\s/g, "") : plain;
+}
+
+export function checkTyped(answer, input, compact = false) {
+  const want = normalizeTyped(answer, compact);
+  const got = normalizeTyped(input, compact);
+  if (!got) return { ok: false, typo: false };
+  if (got === want) return { ok: true, typo: false };
+  const allowed = Math.max(1, Math.floor(want.replace(/\s/g, "").length / 8));
+  const distance = levenshtein(got, want);
+  return { ok: distance <= allowed, typo: distance <= allowed };
+}
+
+// ---------- Spoken answers ----------
+function speechKey(text, lang) {
+  const base = String(lang || "").slice(0, 2).toLowerCase();
+  const plain = normalizeTyped(text, base === "zh" || base === "ja");
+  return plain;
+}
+
+export function speechScore(expected, heard, lang) {
+  const want = speechKey(expected, lang);
+  const got = speechKey(heard, lang);
+  if (!want || !got) return 0;
+  if (got.includes(want)) return 1;
+  return Math.max(0, 1 - levenshtein(got, want) / Math.max(want.length, got.length));
+}
+
+export function speechPasses(expected, alternatives, lang) {
+  const base = String(lang || "").slice(0, 2).toLowerCase();
+  const need = base === "ja" ? 0.5 : base === "zh" ? 0.6 : 0.65;
+  const best = Math.max(0, ...alternatives.map((alt) => speechScore(expected, alt, lang)));
+  return { ok: best >= need, score: best };
+}
+
+// ---------- Recorded audio ----------
+// The key for a recorded clip. scripts/make_audio.mjs and the app both use it,
+// so a line asks for exactly the clip that was made for it.
+export function clipKey(text, lang) {
+  const base = String(lang || "").slice(0, 2).toLowerCase();
+  const clean = String(text || "")
+    .normalize("NFC")
+    .replace(/[…？?。、「」！!，,¿¡.]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${base}|${base === "zh" || base === "ja" ? clean.replace(/\s/g, "") : clean.toLowerCase()}`;
+}
+
+// Every line the app can speak for a course, for making recorded clips.
+export function spokenLines(course) {
+  const lines = new Set();
+  const english = course.scriptLang === "en";
+  const add = (text) => {
+    if (text && String(text).trim()) lines.add(String(text).trim());
+  };
+  for (const unit of course.units) {
+    for (const phrase of unit.phrases) {
+      add(speakText(phrase));
+      if (english) add(phrase.roman);
+      const parts = scriptParts(phrase);
+      wordsOf(phrase.roman).forEach((word, index) => add(parts ? parts[index] : word));
+    }
+  }
+  for (const slide of course.sounds?.slides || []) {
+    for (const example of slide.examples || []) {
+      add(example.speak);
+      add(english ? example.roman : example.script || example.roman);
+    }
+  }
+  for (const item of course.sounds?.quiz || []) add(item.speak?.script);
+  return [...lines];
 }

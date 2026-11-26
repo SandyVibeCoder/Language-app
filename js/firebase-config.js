@@ -1,7 +1,7 @@
 // Paste your Firebase web app config here to turn on accounts.
 // Firebase console → Project settings → General → Your apps → Web app → SDK setup and configuration → Config.
 // These values are public by design. Your Firestore rules (firestore.rules) are what keep each person's data private.
-// Leave this as null and the app works exactly as before: progress stays on the phone, and no sign-in button shows.
+// An account is required to use the app. If this is null, the app only shows a note that accounts aren't set up.
 
 export const firebaseConfig = {
   apiKey: "AIzaSyALIV1428aGe3OTSSsK4TBMsa5Y6gqYZRc",

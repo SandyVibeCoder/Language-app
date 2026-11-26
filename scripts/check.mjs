@@ -5,7 +5,22 @@ import { account } from "../js/account.js";
 import {
   CORE_LESSONS,
   DAILY_GOAL,
+  JUMP_HEARTS,
   LESSON_XP,
+  addDays,
+  applyJump,
+  buildJumpTest,
+  buildRefreshLesson,
+  checkTyped,
+  clipKey,
+  courseDue,
+  isDue,
+  reviewPhrase,
+  seedPhrases,
+  speechPasses,
+  spokenLines,
+  unitCracked,
+  isNodeDone,
   blankState,
   buildNodeLesson,
   buildPhraseLesson,
@@ -143,7 +158,7 @@ let result = completeLesson(state, {
   courseId: "zh",
   unitId: first.id,
   lessonId: "learn",
-  xp: LESSON_XP.learn,
+  xp: 10,
   today: "2026-11-15",
 });
 state = result.state;
@@ -161,7 +176,7 @@ result = completeLesson(state, {
   today: "2026-11-15",
 });
 state = result.state;
-assert(result.awarded === 0 && result.first === false, "no second xp");
+assert(result.awarded === LESSON_XP.replay && result.first === false, "a replay earns the smaller practice XP");
 assert(state.streak === 1, "same-day streak stays");
 
 result = completeLesson(state, {
@@ -173,7 +188,7 @@ result = completeLesson(state, {
 });
 state = result.state;
 assert(result.goalJustMet === true, "daily goal crosses 20");
-assert(state.dailyXp === 22, "same-day xp adds up");
+assert(state.dailyXp === 27, "same-day xp adds up, replays included");
 
 result = completeLesson(state, {
   courseId: "zh",
@@ -249,7 +264,9 @@ assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(listed(esBlock).join() === esRewards.join(), "Spanish rotation order");
 assert(listed(deBlock).join() === deRewards.join(), "German rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v22"'), "service worker cache version");
+assert(sw.includes('const CACHE = "travel-speak-v23"'), "service worker cache version");
+assert(sw.includes("AUDIO_CACHE") && sw.includes("/audio/"), "recorded clips are cached");
+assert(sw.includes("firebasejs/10.14.1") && appSource.length > 0, "the sign-in SDK is cached for offline");
 assert(sw.includes("./js/hear.js"), "character map is cached");
 assert(appSource.includes("utterance.lang = lang"), "speech sets utterance.lang");
 assert(appSource.includes('id.startsWith("zh-tw")') && appSource.includes('id.startsWith("zh-cn")'), "Mandarin voice prefers Taiwan, then China");
@@ -264,7 +281,11 @@ assert(appSource.includes("controllerchange"), "the page reloads once when the w
 assert((appSource.match(/\$\{lessonBar\(/g) || []).length >= 2, "X stays on lesson screens");
 assert(appSource.includes('aria-label="Close lesson"'), "lesson close button");
 assert(appSource.includes("topbar(course.name)"), "course keeps its back header");
-assert(appSource.includes('aria-label="Back"'), "back arrow stays in the lesson header");
+const barFn = appSource.split("function lessonBar")[1]?.split("function quitModal")[0] || "";
+assert(!barFn.includes("backSvg"), "the lesson header has one way out, the X");
+assert(appSource.includes('data-action="quit-confirm"'), "quitting mid-lesson asks first");
+assert(appSource.includes('action === "check-pick"'), "choices are picked, then checked");
+assert(appSource.includes("function sfx("), "sound effects");
 
 const tone1 = toneContour(1);
 const tone2 = toneContour(2);
@@ -347,7 +368,13 @@ for (const course of COURSES) {
   for (const node of path) {
     if (node.kind === "sounds") continue;
     const built = buildNodeLesson(course, node, blankState(), () => 0.3);
-    assert(built.steps.length === 7 && built.steps.length < LESSON_LIMIT, `${course.id}/${node.id} length ${built.steps.length}`);
+    assert(built.steps.length === 8 && built.steps.length < LESSON_LIMIT, `${course.id}/${node.id} length ${built.steps.length}`);
+    for (const step of built.steps) {
+      if (step.type === "type") assert(step.answer && !/[…/()]/.test(step.answer), `${course.id}/${node.id} typed answer ${step.answer}`);
+      if (step.type === "speak") assert(step.fallback?.type === "choice", `${course.id}/${node.id} speak has a fallback`);
+    }
+    const quiet = buildNodeLesson(course, node, blankState(), () => 0.3, { speak: false });
+    assert(!quiet.steps.some((step) => step.type === "speak"), `${course.id}/${node.id} no speaking when it's off`);
     const types = new Set(built.steps.map((step) => step.type));
     const match = built.steps.find((step) => step.type === "match");
     assert(match && match.pairs.length === 5, `${course.id}/${node.id} pairs`);
@@ -357,6 +384,7 @@ for (const course of COURSES) {
       continue;
     }
     assert(types.has("choice") && types.has("tiles") && types.has("listen"), `${course.id}/${node.id} mix`);
+    if (node.kind === "lesson") assert(types.has("type") || types.has("speak"), `${course.id}/${node.id} typing or speaking`);
     const tiles = built.steps.find((step) => step.type === "tiles");
     assert(tiles.tiles.length > tiles.answer.length, `${course.id}/${node.id} distractors`);
     const lead = tiles.answer[0];
@@ -380,10 +408,10 @@ const capped = Array.from({ length: LESSON_LIMIT }, () => ({ type: "choice" }));
 assert(!canQueueRepeat(capped), "ten questions leave no room for another");
 const slides = [
   ...Array.from({ length: 6 }, () => ({ type: "slide" })),
-  ...Array.from({ length: 9 }, () => ({ type: "choice" })),
+  ...Array.from({ length: LESSON_LIMIT - 1 }, () => ({ type: "choice" })),
 ];
 assert(canQueueRepeat(slides), "slides do not count toward the question cap");
-assert(!canQueueRepeat([...slides, { type: "listen" }]), "the tenth question fills the lesson");
+assert(!canQueueRepeat([...slides, { type: "listen" }]), "the last question fills the lesson");
 const legacy = blankState();
 legacy.done["zh:greetings:learn"] = "2026-01-01";
 legacy.done["zh:greetings:practice"] = "2026-01-01";
@@ -425,6 +453,84 @@ assert(swText.includes("./js/account.js") && swText.includes("./js/firebase-conf
   assert(same.streak === 6, "same day keeps the longer streak");
   assert(JSON.stringify(mergeStates(phone, null)) === JSON.stringify(mergeStates(phone, blankState())), "merge with no account data");
 }
+
+// XP: replays, perfect lessons, and runs of right answers.
+{
+  const base = blankState();
+  const one = completeLesson(base, { courseId: "zh", unitId: "u", lessonId: "l", xp: LESSON_XP.lesson, today: "2026-11-20", perfect: true, bestCombo: 10 });
+  assert(one.awarded === LESSON_XP.lesson + LESSON_XP.perfect + LESSON_XP.combo5 + LESSON_XP.combo10, "first finish with every bonus");
+  const two = completeLesson(one.state, { courseId: "zh", unitId: "u", lessonId: "l", xp: LESSON_XP.lesson, today: "2026-11-20", bestCombo: 5 });
+  assert(two.awarded === LESSON_XP.replay + LESSON_XP.combo5 && !two.first, "replay XP plus run bonus");
+  const practice = completeLesson(two.state, { courseId: "zh", unitId: "all", lessonId: "refresh-all", xp: LESSON_XP.refresh, today: "2026-11-20", mark: false });
+  assert(practice.awarded === LESSON_XP.refresh && !practice.state.done["zh:all:refresh-all"], "review XP without marking the path");
+}
+
+// Spaced review.
+{
+  const zh = courseById("zh");
+  const unit = zh.units[0];
+  let s = seedPhrases(blankState(), "zh", unit.phrases.map((p) => p.id), "2026-11-20");
+  assert(!isDue(s, "zh", unit.phrases[0].id, "2026-11-20") && isDue(s, "zh", unit.phrases[0].id, "2026-11-21"), "seeded phrases are due tomorrow");
+  const id = unit.phrases[0].id;
+  s = reviewPhrase(s, "zh", id, true, "2026-11-21");
+  assert(s.srs[`zh:${id}`].b === 2 && s.srs[`zh:${id}`].d === "2026-11-24", "a right answer moves it out 3 days");
+  const same = reviewPhrase(s, "zh", id, true, "2026-11-21");
+  assert(same === s, "a right answer before it's due changes nothing");
+  s = reviewPhrase(s, "zh", id, false, "2026-11-22");
+  assert(s.srs[`zh:${id}`].b === 0 && isDue(s, "zh", id, "2026-11-22"), "a miss makes it due today");
+  assert(addDays("2026-12-30", 3) === "2027-01-02", "dates roll over");
+  let done = blankState();
+  for (const node of coursePath(zh).filter((n) => n.unitId === unit.id)) done.done[`zh:${unit.id}:${node.id}`] = "2026-11-20";
+  done = seedPhrases(done, "zh", unit.phrases.map((p) => p.id), "2026-11-20");
+  assert(!unitCracked(done, zh, unit, "2026-11-20"), "a fresh unit isn't cracked");
+  assert(unitCracked(done, zh, unit, "2026-11-23"), "a unit cracks once many phrases are due");
+  assert(courseDue(done, zh, "2026-11-23").length === unit.phrases.length, "the course lists due phrases");
+  const refresh = buildRefreshLesson(zh, unit.id, done, () => 0.3, { today: "2026-11-23" });
+  assert(refresh.steps.length === 8 && refresh.steps.every((step) => !step.phraseId || unit.phrases.some((p) => p.id === step.phraseId)), "a unit refresh stays in that unit");
+  const merged = mergeStates({ ...blankState(), srs: { "zh:a": { b: 1, d: "2026-11-21", t: 5 } } }, { ...blankState(), srs: { "zh:a": { b: 3, d: "2026-12-01", t: 9 }, "zh:b": { b: 1, d: "2026-11-21", t: 1 } } });
+  assert(merged.srs["zh:a"].b === 3 && merged.srs["zh:b"], "merge keeps the newest review of each phrase");
+}
+
+// Jump ahead.
+for (const course of COURSES) {
+  const test = buildJumpTest(course, 3, () => 0.4);
+  assert(test.steps.length === 10 && test.steps.at(-1).type === "match", `${course.id} jump test`);
+  const allowed = new Set(course.units.slice(0, 3).flatMap((u) => u.phrases.map((p) => p.id)));
+  assert(test.steps.every((step) => !step.phraseId || allowed.has(step.phraseId)), `${course.id} jump test only covers earlier units`);
+  const jumped = applyJump(blankState(), course, 3, "2026-11-20");
+  const path = coursePath(course);
+  const firstOfFour = path.findIndex((n) => n.unitId === course.units[3].id);
+  assert(nodeUnlocked(jumped, course, firstOfFour), `${course.id} jump opens the unit`);
+  assert(!isNodeDone(jumped, course, path[firstOfFour]), `${course.id} the target unit itself is still to do`);
+  assert(Object.keys(jumped.srs).length === allowed.size, `${course.id} skipped phrases go into review`);
+}
+assert(JUMP_HEARTS === 3, "jump tests have 3 hearts");
+
+// Typed and spoken answers.
+assert(checkTyped("¿Qué onda?", "que onda").ok, "accents and punctuation optional");
+assert(checkTyped("Hasta mañana", "asta manana").typo, "one slip is a typo, still right");
+assert(!checkTyped("Hasta mañana", "buenos dias").ok, "wrong words are wrong");
+assert(checkTyped("Xièxie", "xie xie", true).ok, "pinyin without tones or spaces");
+assert(checkTyped("Sumimasen", "sumimasen").ok && checkTyped("Arigatō", "arigato", true).ok, "romaji without macrons");
+assert(checkTyped("Neunundneunzig Luftballons", "neunundneunzig luftballons").ok, "German");
+assert(speechPasses("謝謝", ["謝謝你"], "zh-TW").ok, "heard speech can include a little extra");
+assert(!speechPasses("謝謝", ["你好"], "zh-TW").ok, "different speech fails");
+assert(speechPasses("Buenos días", ["buenos dias"], "es-MX").ok, "Spanish speech ignores accents");
+
+// Recorded clips: every spoken line has one key per course.
+for (const course of COURSES) {
+  const lines = spokenLines(course);
+  assert(lines.length > 100, `${course.id} spoken lines`);
+  for (const unit of course.units) {
+    for (const phrase of unit.phrases) {
+      assert(lines.some((line) => clipKey(line, course.voice) === clipKey(speakText(phrase), course.voice)), `${course.id}/${phrase.id} has a clip key`);
+    }
+  }
+}
+assert(clipKey("¿Qué onda?", "es-MX") === clipKey("Qué onda", "es-MX"), "clip keys ignore punctuation");
+
+// Accounts are required.
+assert(/function lockedOut\(\) \{\s*return !account\.user;/.test(appText), "no way past sign-in without an account");
 
 if (failed) {
   console.error(`${failed} check(s) failed`);

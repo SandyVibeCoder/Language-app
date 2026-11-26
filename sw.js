@@ -1,4 +1,9 @@
-const CACHE = "travel-speak-v22";
+const CACHE = "travel-speak-v23";
+// Recorded clips keep their own cache across app updates, so they download once.
+const AUDIO_CACHE = "travel-speak-audio";
+// The account screen needs the Firebase SDK. Keeping a copy lets a signed-in phone open offline.
+const FIREBASE = "https://www.gstatic.com/firebasejs/10.14.1/";
+const FIREBASE_FILES = ["firebase-app.js", "firebase-auth.js", "firebase-firestore.js"].map((name) => FIREBASE + name);
 
 const ASSETS = [
   "./",
@@ -58,9 +63,35 @@ const ASSETS = [
   "./images/reward-de-08.webp",
 ];
 
+// Saves every recorded clip listed in the manifest that isn't saved yet. Best effort.
+async function saveClips() {
+  try {
+    const res = await fetch("./audio/manifest.json", { cache: "no-cache" });
+    if (!res.ok) return;
+    const { clips = {} } = await res.json();
+    const cache = await caches.open(AUDIO_CACHE);
+    const wanted = new Set(Object.values(clips).map((file) => new URL(file, self.registration.scope).href));
+    for (const request of await cache.keys()) {
+      if (!wanted.has(request.url)) await cache.delete(request);
+    }
+    const missing = [];
+    for (const url of wanted) if (!(await cache.match(url))) missing.push(url);
+    for (let i = 0; i < missing.length; i += 8) {
+      await Promise.allSettled(missing.slice(i, i + 8).map((url) => cache.add(url)));
+    }
+  } catch (err) {
+    /* Clips still load on demand, and the phone's voice covers the rest. */
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting()),
+    caches
+      .open(CACHE)
+      .then((cache) =>
+        cache.addAll(ASSETS).then(() => Promise.allSettled(FIREBASE_FILES.map((url) => cache.add(new Request(url, { mode: "cors" }))))),
+      )
+      .then(() => self.skipWaiting()),
   );
 });
 
@@ -68,8 +99,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
-      .then(() => self.clients.claim()),
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE && key !== AUDIO_CACHE).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
+      .then(() => saveClips()),
   );
 });
 
@@ -95,7 +127,33 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
+  if (request.url.startsWith(FIREBASE)) {
+    // Versioned SDK files never change, so the saved copy is used first.
+    event.respondWith(
+      caches.match(request).then((cached) => cached || fetch(request).then((response) => store(request, response))),
+    );
+    return;
+  }
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.includes("/audio/") && url.pathname.endsWith(".mp3")) {
+    event.respondWith(
+      caches.open(AUDIO_CACHE).then((cache) =>
+        cache.match(request).then(
+          (cached) =>
+            cached ||
+            fetch(request).then((response) => {
+              if (response.ok) cache.put(request, response.clone());
+              return response;
+            }),
+        ),
+      ),
+    );
+    return;
+  }
+  if (url.pathname.endsWith("/audio/manifest.json")) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
   if (isShell(url, request)) {
     event.respondWith(networkFirst(request));
     return;

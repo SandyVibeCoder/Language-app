@@ -1,5 +1,5 @@
-// Optional accounts. Username and password sign-in through Firebase, with progress backed up to Firestore.
-// The Firebase SDK loads only when a config is present, so the app still runs offline and without an account.
+// Required accounts. Username and password sign-in through Firebase, with progress backed up to Firestore.
+// The service worker keeps a copy of the Firebase SDK, so a signed-in phone still opens offline.
 
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -13,6 +13,7 @@ let pending = null;
 
 export const account = {
   enabled: Boolean(firebaseConfig),
+  ready: false,
   user: null,
   syncing: false,
   lastSynced: null,
@@ -81,11 +82,13 @@ export async function startAccount(onChange) {
   try {
     const { auth, authMod } = await load();
     authMod.onAuthStateChanged(auth, (user) => {
+      account.ready = true;
       account.user = user ? { uid: user.uid, username: toUsername(user.email) } : null;
       onChange(account.user);
     });
   } catch (err) {
     // Stay quiet at startup; the account screen tries again when someone signs in.
+    account.ready = true;
     onChange(account.user);
   }
 }

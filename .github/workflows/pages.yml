@@ -27,6 +27,20 @@ jobs:
       - name: Check phrases and progress rules
         run: node scripts/check.mjs
 
+      # Natural-voice clips. Only new or changed lines are requested; the rest come from the cache.
+      # Needs the GOOGLE_TTS_API_KEY repository secret. Without it the app uses the phone's voice.
+      - name: Restore recorded audio
+        uses: actions/cache@v4
+        with:
+          path: audio
+          key: audio-${{ hashFiles('js/courses.js', 'js/hear.js', 'js/engine.js', 'scripts/make_audio.mjs') }}
+          restore-keys: audio-
+
+      - name: Make recorded audio
+        env:
+          GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+        run: node scripts/make_audio.mjs
+
       - name: Prepare the site
         run: |
           mkdir -p _site
