@@ -726,18 +726,9 @@ function matchStep(phrases) {
   };
 }
 
-// Typing and speaking only use whole phrases, not patterns like "Wǒ jiào…".
+// Speaking only uses whole phrases, not patterns like "Wǒ jiào…".
 export function canProduce(phrase) {
   return Boolean(phrase?.roman) && !/[…/()]/.test(phrase.roman);
-}
-
-function typeStep(phrase) {
-  return {
-    type: "type",
-    phraseId: phrase.id,
-    promptLabel: "Type what you hear",
-    answer: phrase.roman,
-  };
 }
 
 function speakStep(phrase) {
@@ -749,7 +740,7 @@ function speakStep(phrase) {
   };
 }
 
-// Picks a phrase that can be typed or spoken, starting at index, else falls back.
+// Picks a phrase that can be spoken, starting at index, else falls back.
 function producible(order, start) {
   for (let i = 0; i < order.length; i += 1) {
     const phrase = order[(start + i) % order.length];
@@ -762,10 +753,6 @@ function buildMix(title, fresh, pool, rng, focus, opts = {}) {
   const order = dedupePhrases([...fresh, ...rng.shuffle(pool)]);
   const at = (index) => order[index % order.length];
   const speakOk = opts.speak !== false;
-  const typed = (index) => {
-    const phrase = producible(order, index);
-    return phrase ? typeStep(phrase) : choiceStepNew(at(index), "toRoman", pool, rng);
-  };
   const spoken = (index) => {
     const phrase = speakOk ? producible(order, index) : null;
     if (!phrase) return choiceStepNew(at(index), "toRoman", pool, rng);
@@ -779,7 +766,7 @@ function buildMix(title, fresh, pool, rng, focus, opts = {}) {
       listenStep(at(0), pool, rng),
       choiceStepNew(at(1), "toEn", pool, rng),
       listenStep(at(2), pool, rng),
-      typed(3),
+      choiceStepNew(at(3), "toEn", pool, rng),
       listenStep(at(4), pool, rng),
       spoken(0),
       listenStep(at(1), pool, rng),
@@ -792,7 +779,7 @@ function buildMix(title, fresh, pool, rng, focus, opts = {}) {
     choiceStepNew(at(1), "toEn", pool, rng),
     listenStep(at(2), pool, rng),
     tileStep(at(3), pool, rng),
-    typed(4),
+    tileStep(at(4), pool, rng),
     spoken(0),
     listenStep(at(1), pool, rng),
     pairs(),
@@ -949,18 +936,14 @@ export function buildJumpTest(course, unitIndex, random = Math.random, opts = {}
   const at = (index) => order[index % order.length];
   const steps = [];
   const kinds = course.focus === "listen"
-    ? ["listen", "toEn", "type", "listen", "toEn", "listen", "type", "toEn", "listen", "match"]
-    : ["toRoman", "toEn", "listen", "tiles", "type", "toRoman", "listen", "toEn", "type", "match"];
+    ? ["listen", "toEn", "toRoman", "listen", "toEn", "listen", "toRoman", "toEn", "listen", "match"]
+    : ["toRoman", "toEn", "listen", "tiles", "toRoman", "tiles", "listen", "toEn", "tiles", "match"];
   kinds.forEach((kind, index) => {
     const phrase = at(index);
     if (kind === "listen") steps.push(listenStep(phrase, pool, rng));
     else if (kind === "toEn" || kind === "toRoman") steps.push(choiceStepNew(phrase, kind, pool, rng));
     else if (kind === "tiles") steps.push(tileStep(phrase, pool, rng));
-    else if (kind === "match") steps.push(matchStep(rng.shuffle(pool).slice(0, 5)));
-    else {
-      const typed = producible(order, index);
-      steps.push(typed ? typeStep(typed) : choiceStepNew(phrase, "toRoman", pool, rng));
-    }
+    else steps.push(matchStep(rng.shuffle(pool).slice(0, 5)));
   });
   const target = course.units[unitIndex];
   return { kind: "mix", title: `Jump to ${target.title}`, steps };
@@ -981,7 +964,7 @@ export function applyJump(state, course, unitIndex, today = dayKey()) {
   return next;
 }
 
-// ---------- Typed answers ----------
+// ---------- Answer matching ----------
 export function levenshtein(a, b) {
   const x = [...a];
   const y = [...b];
@@ -996,7 +979,7 @@ export function levenshtein(a, b) {
   return prev[y.length];
 }
 
-// Accents, tone marks, macrons, capitals, and punctuation are optional when typing.
+// Accents, tone marks, macrons, capitals, and punctuation are ignored when matching speech.
 export function normalizeTyped(text, compact = false) {
   const plain = String(text || "")
     .replace(/ß/g, "ss")
@@ -1008,16 +991,6 @@ export function normalizeTyped(text, compact = false) {
     .replace(/\s+/g, " ")
     .trim();
   return compact ? plain.replace(/\s/g, "") : plain;
-}
-
-export function checkTyped(answer, input, compact = false) {
-  const want = normalizeTyped(answer, compact);
-  const got = normalizeTyped(input, compact);
-  if (!got) return { ok: false, typo: false };
-  if (got === want) return { ok: true, typo: false };
-  const allowed = Math.max(1, Math.floor(want.replace(/\s/g, "").length / 8));
-  const distance = levenshtein(got, want);
-  return { ok: distance <= allowed, typo: distance <= allowed };
 }
 
 // ---------- Spoken answers ----------

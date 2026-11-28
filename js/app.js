@@ -9,7 +9,6 @@ import {
   buildJumpTest,
   buildNodeLesson,
   buildRefreshLesson,
-  checkTyped,
   clipKey,
   courseDue,
   seedPhrases,
@@ -547,8 +546,7 @@ function paintAudio() {
     const status = root().querySelector("[data-audio-status]");
     if (status && session) {
       const playing = session.voice === "playing" || session.voice === "trying";
-      const failText = currentStep()?.type === "type" ? "" : "No voice on this phone. Use the choices.";
-      const text = session.voice === "failed" ? failText : playing ? "Playing…" : "";
+      const text = session.voice === "failed" ? "No voice on this phone. Use the choices." : playing ? "Playing…" : "";
       if (status.textContent !== text) status.textContent = text;
     }
     const course = currentCourse();
@@ -567,14 +565,6 @@ function paintAudio() {
           </div>`,
         );
       }
-    }
-    if (session?.voice === "failed" && step?.type === "type" && course && !root().querySelector(".fallback")) {
-      const phrase = findPhrase(course, step.phraseId);
-      const play = root().querySelector("[data-action='play']");
-      (play?.closest(".listen-row") || play)?.insertAdjacentHTML(
-        "afterend",
-        `<div class="fallback"><p class="prompt">${esc(phrase?.en || "")}</p><p class="hint">No voice on this phone. Type the ${esc(course.romanName.toLowerCase())} for this meaning.</p></div>`,
-      );
     }
     if (session?.hearFailed && session.queue && !root().querySelector("[data-hear-note]")) {
       root().querySelector(".flip-scene")?.insertAdjacentHTML(
@@ -597,7 +587,7 @@ function currentNode() {
 
 function feedbackSpeech(course, step) {
   if (!step || step.type === "match" || step.type === "listen") return "";
-  if (step.type === "type" || step.type === "speak") {
+  if (step.type === "speak") {
     const phrase = findPhrase(course, step.phraseId);
     return phrase ? speakText(phrase) : "";
   }
@@ -610,7 +600,7 @@ function answerLine(course, step) {
   const phrase = step?.phraseId ? findPhrase(course, step.phraseId) : null;
   if (step?.type === "tiles") return `${step.answer.join(" ")}  ${phrase?.script || ""}`.trim();
   if (step?.type === "listen" && phrase) return `${phrase.en} · ${phrase.roman}`;
-  if ((step?.type === "type" || step?.type === "speak") && phrase) {
+  if (step?.type === "speak" && phrase) {
     return `${phrase.roman}${scriptLang(course) === "en" ? "" : `  ${phrase.script}`} · ${phrase.en}`;
   }
   if (step?.type === "match") return "Match each line with its meaning.";
@@ -812,7 +802,6 @@ function advance() {
   session.matchCols = null;
   session.matchBad = [];
   session.pickedOption = null;
-  session.typed = "";
   session.speak = freshSpeak();
   session.notice = "";
   session.voice = "idle";
@@ -857,7 +846,6 @@ function beginBuilt(courseId, unitId, lessonId, nodeKind, built, practice, extra
     bestCombo: 0,
     missed: [],
     startedAt: Date.now(),
-    typed: "",
     speak: freshSpeak(),
     notice: "",
     confirmQuit: false,
@@ -1211,17 +1199,6 @@ function onClick(event) {
     turnOffSpeaking("Speaking is off for an hour. You can turn it back on from Account.");
     return;
   }
-  if (action === "type-check") {
-    if (session.feedback) return;
-    const step = currentStep();
-    const value = document.getElementById("type-input")?.value || "";
-    if (!value.trim()) return;
-    session.typed = value;
-    const course = currentCourse();
-    const result = checkTyped(step.answer, value, scriptLang(course) !== "en");
-    grade(result.ok, { note: result.ok && result.typo ? `Watch the spelling: ${step.answer}` : "" });
-    return;
-  }
   if (action === "check-pick") {
     if (session.feedback || !session.pickedOption) return;
     const step = currentStep();
@@ -1486,15 +1463,10 @@ function render() {
   else if (window.scrollY !== keepWin) window.scrollTo(0, keepWin);
   if (shouldReset) app.querySelector(".path-node.current")?.scrollIntoView({ block: "center" });
   const step = currentStep();
-  const heard = step?.type === "listen" || (step?.type === "type" && !session.feedback);
-  if (session?.phase === "run" && heard && session.autoFor !== session.index) {
+  if (session?.phase === "run" && step?.type === "listen" && session.autoFor !== session.index) {
     session.autoFor = session.index;
     const phrase = findPhrase(course, step.phraseId);
     if (phrase) playLine(speakText(phrase), course.voice, phrase.roman);
-  }
-  if (session?.phase === "run" && step?.type === "type" && !session.feedback && session.focusFor !== session.index) {
-    session.focusFor = session.index;
-    document.getElementById("type-input")?.focus({ preventScroll: true });
   }
 }
 
@@ -1805,15 +1777,14 @@ function renderQuestion(course) {
   else if (step.type === "listen") body = renderListen(course, step);
   else if (step.type === "tiles") body = renderTiles(course, step);
   else if (step.type === "match") body = renderMatch(course, step);
-  else if (step.type === "type") body = renderType(course, step);
   else if (step.type === "speak") body = renderSpeak(course, step);
   else body = renderChoice(course, step, note);
   const showContinue = step?.type === "slide" || session.feedback;
   const picks = step?.type === "choice" || step?.type === "listen";
   const tileReady = step?.type === "tiles" && session.tiles.length > 0;
-  const ready = step?.type === "tiles" ? tileReady : picks ? Boolean(session.pickedOption) : step?.type === "type" ? Boolean(session.typed.trim()) : false;
-  const showCheck = (step?.type === "tiles" || picks || step?.type === "type") && !session.feedback;
-  const checkAction = step?.type === "tiles" ? "check" : step?.type === "type" ? "type-check" : "check-pick";
+  const ready = step?.type === "tiles" ? tileReady : picks ? Boolean(session.pickedOption) : false;
+  const showCheck = (step?.type === "tiles" || picks) && !session.feedback;
+  const checkAction = step?.type === "tiles" ? "check" : "check-pick";
   const continueLabel = session.failed ? "Try again" : session.index === total - 1 ? "Finish" : "Continue";
   const continueAction = session.failed ? "retry" : "continue";
   const leave = session.failed ? `<button type="button" class="text" data-action="done-stop">Back to the path</button>` : "";
@@ -1915,32 +1886,6 @@ function renderListen(course, step) {
     <p class="hint" data-audio-status></p>
     ${shown}
     <div class="options">${options}</div>`;
-}
-
-function renderType(course, step) {
-  const phrase = findPhrase(course, step.phraseId);
-  const english = scriptLang(course) === "en";
-  const hint = english
-    ? `Type it in ${course.romanName}. Accents are optional.`
-    : `Type it in ${course.romanName.toLowerCase()}. ${course.id === "zh" ? "Tone marks" : "Long-vowel marks"} and spaces are optional.`;
-  const shown = phrase && session.feedback
-    ? `${hearable(course, speakText(phrase), "roman", esc(phrase.roman))}${scriptLine(course, phrase, speakText(phrase))}`
-    : "";
-  return `
-    <p class="prompt-label">${esc(step.promptLabel)}</p>
-    <div class="listen-row">
-      <button type="button" class="play" data-action="play">Play</button>
-      <button type="button" class="secondary slim" data-action="slow">Slow</button>
-    </div>
-    <p class="hint" data-audio-status></p>
-    <label class="field type-field">
-      <span class="sr-only">Your answer</span>
-      <input id="type-input" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"
-        lang="${esc(english ? course.voice : "en")}" enterkeyhint="done" value="${esc(session.typed)}" ${session.feedback ? "disabled" : ""}
-        placeholder="Type what you hear">
-    </label>
-    <p class="hint">${esc(hint)}</p>
-    ${shown}`;
 }
 
 function renderSpeak(course, step) {
@@ -2321,18 +2266,7 @@ function boot() {
   state = load();
   loadClips();
   root().addEventListener("click", onClick);
-  root().addEventListener("input", (event) => {
-    if (event.target.id !== "type-input" || !session) return;
-    session.typed = event.target.value;
-    const check = root().querySelector("[data-action='type-check']");
-    if (check) check.disabled = !session.typed.trim();
-  });
   root().addEventListener("keydown", (event) => {
-    if (event.target.id === "type-input" && event.key === "Enter") {
-      event.preventDefault();
-      root().querySelector("[data-action='type-check']")?.click();
-      return;
-    }
     if (event.key !== "Enter" && event.key !== " ") return;
     const el = event.target.closest("[data-action]");
     if (!el || el.tagName === "BUTTON") return;

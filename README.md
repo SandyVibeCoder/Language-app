@@ -29,10 +29,9 @@ The workflow tries to turn Pages on by itself. GitHub often blocks that for the 
 - Japanese for Japan, in romaji with macrons. Kana and kanji are small, next to the answer.
 - Spanish as spoken casually in Mexico, for following conversations around you: greetings, fillers, slang, reactions, and fast-speech shortcuts. Lessons lean on listening. A small sound-it-out guide sits next to each answer (capitals mark the stress, rr marks a rolled r).
 - German for following the song 99 Luftballons: counting to 99, then the song's key words, then the basics. Lessons lean on listening, with a sound-it-out guide beside each answer.
-- Each course is a path of lessons. A lesson mixes meaning questions, word tiles, listening, typing what you hear, saying a phrase out loud, and matching pairs. Pinyin or romaji comes first. Characters stay small.
+- Each course is a path of lessons. A lesson mixes multiple choice, building a phrase from word tiles, listening, saying a phrase out loud, and matching pairs. There's no typing. Pinyin or romaji comes first. Characters stay small.
 - Tap an answer, then **Check**, so a slip of the finger doesn't count. Sound effects for right and wrong answers can be turned off under Account.
 - Speaking uses the phone's speech recognition. A miss there never costs a heart. **Can't speak now** turns speaking off for an hour.
-- Typing ignores capitals, punctuation, accents, tone marks, and macrons. One small typo still counts, with a note.
 - Five hearts at the start of each lesson. A mistake costs one. If they run out, the lesson stops and you can try it again. Nothing is for sale. The X asks before you quit mid-lesson.
 - XP: 15 for a new lesson, 12 for a unit review, 5 for replaying one, plus 5 for no mistakes and 2 each for 5 and 10 right in a row. A daily streak and a daily goal of 20 XP. No ranking.
 - The end of each lesson shows accuracy, time, best run, and the phrases to practice.

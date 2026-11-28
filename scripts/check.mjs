@@ -11,7 +11,6 @@ import {
   applyJump,
   buildJumpTest,
   buildRefreshLesson,
-  checkTyped,
   clipKey,
   courseDue,
   isDue,
@@ -264,7 +263,7 @@ assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(listed(esBlock).join() === esRewards.join(), "Spanish rotation order");
 assert(listed(deBlock).join() === deRewards.join(), "German rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v25"'), "service worker cache version");
+assert(sw.includes('const CACHE = "travel-speak-v26"'), "service worker cache version");
 assert(sw.includes("AUDIO_CACHE") && sw.includes("/audio/"), "recorded clips are cached");
 assert(sw.includes("firebasejs/10.14.1") && appSource.length > 0, "the sign-in SDK is cached for offline");
 assert(sw.includes("./js/hear.js"), "character map is cached");
@@ -370,7 +369,7 @@ for (const course of COURSES) {
     const built = buildNodeLesson(course, node, blankState(), () => 0.3);
     assert(built.steps.length === 8 && built.steps.length < LESSON_LIMIT, `${course.id}/${node.id} length ${built.steps.length}`);
     for (const step of built.steps) {
-      if (step.type === "type") assert(step.answer && !/[…/()]/.test(step.answer), `${course.id}/${node.id} typed answer ${step.answer}`);
+      assert(step.type !== "type", `${course.id}/${node.id} has no typing questions`);
       if (step.type === "speak") assert(step.fallback?.type === "choice", `${course.id}/${node.id} speak has a fallback`);
     }
     const quiet = buildNodeLesson(course, node, blankState(), () => 0.3, { speak: false });
@@ -384,7 +383,7 @@ for (const course of COURSES) {
       continue;
     }
     assert(types.has("choice") && types.has("tiles") && types.has("listen"), `${course.id}/${node.id} mix`);
-    if (node.kind === "lesson") assert(types.has("type") || types.has("speak"), `${course.id}/${node.id} typing or speaking`);
+    if (node.kind === "lesson") assert(types.has("speak"), `${course.id}/${node.id} has a speaking question`);
     const tiles = built.steps.find((step) => step.type === "tiles");
     assert(tiles.tiles.length > tiles.answer.length, `${course.id}/${node.id} distractors`);
     const lead = tiles.answer[0];
@@ -506,13 +505,7 @@ for (const course of COURSES) {
 }
 assert(JUMP_HEARTS === 3, "jump tests have 3 hearts");
 
-// Typed and spoken answers.
-assert(checkTyped("¿Qué onda?", "que onda").ok, "accents and punctuation optional");
-assert(checkTyped("Hasta mañana", "asta manana").typo, "one slip is a typo, still right");
-assert(!checkTyped("Hasta mañana", "buenos dias").ok, "wrong words are wrong");
-assert(checkTyped("Xièxie", "xie xie", true).ok, "pinyin without tones or spaces");
-assert(checkTyped("Sumimasen", "sumimasen").ok && checkTyped("Arigatō", "arigato", true).ok, "romaji without macrons");
-assert(checkTyped("Neunundneunzig Luftballons", "neunundneunzig luftballons").ok, "German");
+// Spoken answers.
 assert(speechPasses("謝謝", ["謝謝你"], "zh-TW").ok, "heard speech can include a little extra");
 assert(!speechPasses("謝謝", ["你好"], "zh-TW").ok, "different speech fails");
 assert(speechPasses("Buenos días", ["buenos dias"], "es-MX").ok, "Spanish speech ignores accents");
