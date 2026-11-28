@@ -233,11 +233,11 @@ const mandarin = {
       [
         p("g-hello", "Hello", "Nǐ hǎo", "你好", "Two third tones. Say it ní hǎo."),
         p("g-morning", "Good morning", "Zǎo ān", "早安"),
-        p("g-evening", "Good evening / good night", "Wǎn ān", "晚安", "Used in the evening and at bedtime."),
+        p("g-evening", "Good night", "Wǎn ān", "晚安", "For bedtime or parting late at night. Not a hello."),
         p("g-thanks", "Thank you", "Xièxie", "謝謝"),
         p("g-welcome", "You're welcome", "Bú kèqi", "不客氣"),
         p("g-sorry", "Excuse me / sorry", "Bù hǎoyìsi", "不好意思", "The phrase you will use most."),
-        p("g-bye", "Goodbye", "Zàijiàn", "再見"),
+        p("g-baibai", "Bye", "Bāibāi", "掰掰", "From English bye-bye. Very common in Taiwan. Zàijiàn (再見) is a little more formal."),
         p("g-please", "Please", "Qǐng", "請", "Put it in front of a request."),
         p("g-yes", "Yes / that's right", "Duì", "對"),
         p("g-no", "No", "Bú shì", "不是"),

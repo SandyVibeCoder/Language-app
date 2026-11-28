@@ -5,7 +5,7 @@ export const HEAR = {
     "g-thanks": "謝謝",
     "g-welcome": "不 客氣",
     "g-sorry": "不 好意思",
-    "g-bye": "再見",
+    "g-baibai": "掰掰",
     "g-meet": "很 高興 認識 你",
     "g-english": "你 會 說 英文 嗎",
     "g-restroom": "洗手間 在 哪裡",
