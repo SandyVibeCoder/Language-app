@@ -1,4 +1,4 @@
-const CACHE = "travel-speak-v23";
+const CACHE = "travel-speak-v24";
 // Recorded clips keep their own cache across app updates, so they download once.
 const AUDIO_CACHE = "travel-speak-audio";
 // The account screen needs the Firebase SDK. Keeping a copy lets a signed-in phone open offline.

@@ -264,7 +264,7 @@ assert(listed(jaBlock).join() === jaRewards.join(), "Japanese rotation order");
 assert(listed(esBlock).join() === esRewards.join(), "Spanish rotation order");
 assert(listed(deBlock).join() === deRewards.join(), "German rotation order");
 assert(appSource.includes("% posters.length"), "posters cycle when there are fewer units");
-assert(sw.includes('const CACHE = "travel-speak-v23"'), "service worker cache version");
+assert(sw.includes('const CACHE = "travel-speak-v24"'), "service worker cache version");
 assert(sw.includes("AUDIO_CACHE") && sw.includes("/audio/"), "recorded clips are cached");
 assert(sw.includes("firebasejs/10.14.1") && appSource.length > 0, "the sign-in SDK is cached for offline");
 assert(sw.includes("./js/hear.js"), "character map is cached");
